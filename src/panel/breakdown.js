@@ -12,12 +12,13 @@ export const BUCKET_INFO = {
   rebuilds: { label: 'Cache rebuilds', tip: 'Context written to the cache again after it expired, after a model switch, or after compaction.', color: 'var(--s2)' },
   output: { label: 'Output', tip: 'Tokens the model wrote: answers, tool calls and thinking.', color: 'var(--s6)' },
   unattributed: { label: 'Unattributed', tip: "Context growth the transcript doesn't explain.", color: 'var(--muted-fg)' },
+  side: { label: 'Side requests', tip: 'Small requests omp makes next to the conversation: titles, predictions, recaps and checks.', color: 'var(--q1)' },
 }
 
 export const REASON_INFO = {
   ssh: { label: 'On SSH hosts', next: 'Breakdown reads transcripts on this machine only. SSH usage still counts in the total.' },
-  opencode: { label: 'OpenCode sessions', next: 'Breakdown reads Claude Code and Codex transcripts. OpenCode usage still counts in the total.' },
-  omp: { label: 'omp sessions', next: 'Breakdown reads Claude Code and Codex transcripts. omp usage still counts in the total.' },
+  opencode: { label: 'OpenCode sessions', next: 'Breakdown reads Claude Code, Codex and omp transcripts. OpenCode usage still counts in the total.' },
+  omp: { label: 'Deleted omp sessions', next: 'These requests are only in stats.db, because their session files were deleted. They count in the total but cannot be split.' },
   zstd: { label: 'Compressed Codex files', next: "This Orca's Node.js can't read .zst files. Updating Orca fixes it." },
   'too-large': { label: 'Files too large', next: 'Compressed transcripts over 64 MB are skipped.' },
   parse: { label: "Files that couldn't be read", next: 'See the This machine status above for which files failed.' },
@@ -137,7 +138,7 @@ export function tree(view) {
 }
 
 function kindLabel(kind) {
-  return { file: 'file', command: 'command', agent: 'subagent', web: 'web', mcp: 'MCP', tool: 'tool', messages: 'message', injected: 'injected', summary: 'summary', bucket: '' }[kind] ?? ''
+  return { file: 'file', command: 'command', agent: 'subagent', web: 'web', mcp: 'MCP', tool: 'tool', messages: 'message', injected: 'injected', summary: 'summary', side: 'side request', bucket: '' }[kind] ?? ''
 }
 
 function lastSegment(path) {

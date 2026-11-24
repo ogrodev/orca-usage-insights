@@ -2,14 +2,11 @@
 // offsets in the (decompressed) file. State is plain JSON: { adapter, fold, offset }.
 import { createClaudeEvents } from '../core/breakdown/claude-events.mjs';
 import { createCodexEvents } from '../core/breakdown/codex-events.mjs';
+import { createOmpEvents } from '../core/breakdown/omp-events.mjs';
 import { createFold } from '../core/breakdown/fold.mjs';
 
 const LF = 0x0a;
-const ADAPTERS = { claude: createClaudeEvents, codex: createCodexEvents };
-
-export function digestible(kind) {
-  return Object.hasOwn(ADAPTERS, kind);
-}
+const ADAPTERS = { claude: createClaudeEvents, codex: createCodexEvents, omp: createOmpEvents };
 
 // `adopt`: state() returns live objects (see createFold), for a caller that drops the consumer after reading it.
 export function createDigestConsumer(file, state = null, { adopt = false } = {}) {

@@ -109,6 +109,16 @@ export function injectedTarget() {
   return { key: 'injected', label: 'injected', kind: 'injected' };
 }
 
+export function customTarget(type) {
+  const name = nonBlank(type) ?? 'unknown';
+  return { key: `injected:custom:${name}`, label: name, kind: 'injected' };
+}
+
+export function sideTarget(purpose) {
+  const name = nonBlank(purpose) ?? 'unknown';
+  return { key: `side:${name}`, label: name, kind: 'side' };
+}
+
 export function attachmentTarget(type) {
   const name = nonBlank(type) ?? 'unknown';
   return { key: `injected:attachment:${name}`, label: `attachment: ${name}`, kind: 'injected' };

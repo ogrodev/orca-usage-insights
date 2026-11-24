@@ -26,6 +26,7 @@ const GROUPS = {
   messages: '(conversation)',
   injected: '(conversation)',
   summary: '(conversation)',
+  side: '(side requests)',
 };
 const B = Object.fromEntries(BUCKETS.map((name, i) => [name, i]));
 const UNATTRIBUTED = ['unattributed', '(unattributed)', 'bucket'];
@@ -134,7 +135,7 @@ function analyze({ table: records, digests, files, catalog, range, startDate, en
     usageUsd += cost;
     let known = seen.get(sessionId[i]);
     if (known === undefined || known[0] !== provider[i] || known[1] !== host[i]) {
-      known = [provider[i], host[i], sessions.id(nameOf(provider[i]), hostNames[host[i] + 1], nameOf(sessionId[i]))];
+      known = [provider[i], host[i], sessions.id(harnessOf(nameOf(provider[i])), hostNames[host[i] + 1], nameOf(sessionId[i]))];
       seen.set(sessionId[i], known);
     }
     const g = known[2] * SESSION + day + DAY_OFFSET;
@@ -159,7 +160,8 @@ function analyze({ table: records, digests, files, catalog, range, startDate, en
     if (!raw || !(Array.isArray(raw.rows) || ArrayBuffer.isView(raw.rows))) continue;
     const d = (packed[index] = packDigest(raw));
     const host = d.host || 'local';
-    if (allowed && !allowed.has(d.harness)) continue;
+    const rowProviders = d.harness === 'omp' ? (d.models ?? []).map((m) => `omp:${String(m).split('/')[0]}`) : null;
+    if (allowed && !(rowProviders ? rowProviders.some((p) => allowed.has(p)) : allowed.has(d.harness))) continue;
     if (allowedHosts && !allowedHosts.has(host)) continue;
     // Scope is per row, by the cwd each request ran in, as Usage scopes each turn.
     const cwds = cwdsOf(d);
@@ -172,6 +174,7 @@ function analyze({ table: records, digests, files, catalog, range, startDate, en
       if (!(usd > 0)) continue; // unpriced (its records are unpriced too) or free
       if (kept && !kept[d.rowCwd?.[r] ?? 0]) continue;
       const day = rowDay[r];
+      if (allowed && rowProviders && !allowed.has(rowProviders[d.rows[r * W + 1]])) continue;
       if (!inRange(day)) continue;
       const g = session + day;
       pDigest.push(index);
@@ -196,7 +199,7 @@ function analyze({ table: records, digests, files, catalog, range, startDate, en
     const dUsd = digestUsd.get(g) ?? 0;
     if (dUsd === 0) {
       const [provider, host, sessionId] = sessions.list[Math.floor(g / SESSION)];
-      const reason = fileReasons.get(sessionKey(provider, host, sessionId)) ?? (host !== 'local' ? 'ssh' : provider === 'opencode' ? 'opencode' : String(provider).startsWith('omp:') ? 'omp' : 'unmatched');
+      const reason = fileReasons.get(sessionKey(provider, host, sessionId)) ?? (host !== 'local' ? 'ssh' : provider === 'opencode' ? 'opencode' : provider === 'omp' ? 'omp' : 'unmatched');
       const bucket = notAnalysed.get(reason);
       bucket.usd += u.usd;
       bucket.turns += u.turns;
@@ -258,7 +261,7 @@ function analyze({ table: records, digests, files, catalog, range, startDate, en
     const day = (pGroup[p] % SESSION) - DAY_OFFSET;
     const bucketIndex = rows[at + 3];
     if (bucketIndex === B.tools) feed(slot.large ?? (slot.large = finding(findingAcc, 'large-results', d, digests[index], target, rows[at + 4], memo)), rows, at, usd, est, day);
-    if (rows[at + 6] === 1 && target[2] === 'file' && d.harness === 'claude') feed(slot.repeat ?? (slot.repeat = finding(findingAcc, 'repeat-reads', d, digests[index], target, rows[at + 4], memo)), rows, at, usd, est, day);
+    if (rows[at + 6] === 1 && target[2] === 'file' && (d.harness === 'claude' || d.harness === 'omp')) feed(slot.repeat ?? (slot.repeat = finding(findingAcc, 'repeat-reads', d, digests[index], target, rows[at + 4], memo)), rows, at, usd, est, day);
     if (bucketIndex === B.rebuilds && target[0] === 'rebuild:idle') feed(slot.idle ?? (slot.idle = finding(findingAcc, 'cache-expired', d, digests[index], target, rows[at + 4], memo)), rows, at, usd, est, day);
   }
 
@@ -302,8 +305,11 @@ function pricedRows(d, catalog, zone, toLocal) {
   for (let r = 0, at = 0; r < n; r++, at += W) {
     const ms = rows[at] * SLOT_MS;
     day[r] = Number.isFinite(ms) ? Math.floor(toLocal(ms) / DAY_MS) : NaN;
+    const rate = d.rates?.[`${rows[at + 1]}|${rows[at + 2]}`];
     const entry = entries[rows[at + 1]];
-    if (entry) {
+    if (rate) {
+      usd[r] = rows[at + 7] * (rate[0] ?? 0) + rows[at + 8] * (rate[1] ?? 0) + (rows[at + 9] + rows[at + 10]) * (rate[2] ?? 0) + rows[at + 11] * (rate[3] ?? 0);
+    } else if (entry) {
       usd[r] = costOfTokens(entry, rows[at + 2], { input: rows[at + 7], cacheRead: rows[at + 8], cacheWrite5m: rows[at + 9], cacheWrite1h: rows[at + 10], output: rows[at + 11] });
     }
   }
@@ -341,6 +347,10 @@ function sessionIndex() {
 
 function sessionKey(provider, host, sessionId) {
   return JSON.stringify([provider, host || 'local', sessionId ?? '']);
+}
+
+function harnessOf(provider) {
+  return typeof provider === 'string' && provider.startsWith('omp:') ? 'omp' : provider;
 }
 
 function makeNode(key, label, kind) {

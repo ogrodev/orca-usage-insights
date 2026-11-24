@@ -62,7 +62,7 @@ Cost is an estimate at list API prices, so it's what the same tokens would cost 
 
 Switch the panel to **Breakdown** to see what the money went on. It splits the same total as the Usage view, to the cent, into:
 
-* **Buckets**: session start (system prompt, tools, memory files), tool results, your messages, injected context, earlier replies, compaction summaries, cache rebuilds and output.
+* **Buckets**: session start (system prompt, tools, memory files), tool results, your messages, injected context, earlier replies, compaction summaries, cache rebuilds, output, and for omp side requests (titles, predictions, recaps and other small calls next to the conversation).
 * **Where it went**: click from a project into its folders and files, or into its commands (`$ git status`, `$ npm test`), subagents and other tools.
 * **Patterns worth a look**: large tool results that stayed in context, the same file read again with no edit in between, and the cache expiring after a break. Each card shows what that pattern cost.
 
@@ -73,13 +73,13 @@ Switch the panel to **Breakdown** to see what the money went on. It splits the s
   </tr>
 </table>
 
-Each pattern has an **Explain** button. It gives you a prompt to paste into Claude Code or Codex. The prompt holds the numbers and a few `node` commands that print short excerpts of the transcripts involved, so your agent can work out the cause and suggest a fix. Reading those excerpts costs your agent a few thousand tokens (the panel shows an estimate), and they go to its model provider like any other file it reads.
+Each pattern has an **Explain** button. It gives you a prompt to paste into Claude Code, Codex or omp. The prompt holds the numbers and a few `node` commands that print short excerpts of the transcripts involved, so your agent can work out the cause and suggest a fix. Reading those excerpts costs your agent a few thousand tokens (the panel shows an estimate), and they go to its model provider like any other file it reads.
 
 <p align="center">
   <img src="images/screenshot-explain.png" alt="The Explain dialog with a prompt for one pattern, ready to copy" width="720">
 </p>
 
-`≈` marks a split that is estimated (several tool results in one turn are split by size). Spend that can't be split, such as usage on SSH hosts or in OpenCode, is listed under **Not analysed** with the reason. Breakdown follows the range, custom dates included, but not the model or cache-token filters. The first Breakdown reads the transcripts changed within the range, which takes a few seconds on a big history; after that only new lines are read.
+`≈` marks a split that is estimated (several tool results in one turn are split by size). Spend that can't be split, such as usage on SSH hosts, in OpenCode, or omp history whose session files were deleted, is listed under **Not analysed** with the reason. Breakdown follows the range, custom dates included, but not the model or cache-token filters. The first Breakdown reads the transcripts changed within the range, which takes a few seconds on a big history; after that only new lines are read.
 
 ## Prices
 
@@ -122,6 +122,8 @@ For each profile it reads:
 A request that is in both, or in a forked session, counts once. Cost is the cost omp recorded, not the price list.
 
 Each omp provider is its own provider in the panel (`OMP · Anthropic`, `OMP · OpenAI Codex`, …). The **Account** filter and the account list split omp usage by the account that served each request. `stats.db` does not record accounts, so requests known only from it count under their provider without an account.
+
+Breakdown reads omp session files too. It prices each part of a request at the rates omp recorded for that request, so its total matches the Usage total. Requests known only from `stats.db` show under **Not analysed** as **Deleted omp sessions**.
 
 The **Quotas** card shows one list per provider. Each limit shows the median use across that provider's accounts, the number of accounts that have the limit, and the earliest reset among them. The provider line also counts its accounts and banked resets. It comes from `omp usage --json`, which the worker runs once a minute at most, per profile, and again when you click **Refresh**. omp calls its providers' usage endpoints with its own credentials; the plugin never reads them. The same call gives each account its name (its email). The names are kept in `omp-accounts-v1.json` in the cache folder, so an account you removed from omp keeps its name. If `omp` is not on the worker's `PATH` or in `~/.local/bin`, set **omp command** in Settings.
 
@@ -172,7 +174,7 @@ The first open after updating from 1.1.0 reads everything once, like a first ins
 
 Your transcripts stay on your machines. The plugin makes no network requests of its own, with two exceptions you start yourself: the SSH connections you add, and **Sync prices**, which downloads the public price lists from `raw.githubusercontent.com` (LiteLLM) and `models.dev` when you click it. Nothing about your usage is sent with those requests. For the Quotas card it runs your `omp usage --json`, and omp asks your providers for your current limits.
 
-**What it reads:** your Claude Code and Codex transcripts, including Codex's compressed `.jsonl.zst` files, your local OpenCode SQLite database, and your omp session files and `stats.db`. Breakdown does not read OpenCode or omp yet, so their spend shows under **Not analysed**.
+**What it reads:** your Claude Code and Codex transcripts, including Codex's compressed `.jsonl.zst` files, your local OpenCode SQLite database, and your omp session files and `stats.db`. Breakdown does not read OpenCode, so its spend shows under **Not analysed**.
 
 **What it keeps** in its cache folder, so later opens are fast:
 

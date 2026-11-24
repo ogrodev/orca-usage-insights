@@ -7,7 +7,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import { join } from 'node:path';
 import { decodeDigest, encodeDigest, packDigest } from '../core/breakdown/digest-rows.mjs';
-import { createDigestConsumer, digestible } from './digest-consumer.mjs';
+import { createDigestConsumer } from './digest-consumer.mjs';
 import { createParsePool } from './parse-pool.mjs';
 import { rootSpecs } from './paths.mjs';
 import { listTranscripts, readTranscript } from './transcript-files.mjs';
@@ -67,7 +67,7 @@ export function createDigestScanner({
     if (threads > 0 && !pool && fs === fsp) pool = createParsePool(threads);
     const roots = await rootSpecs({ platform, env, home, readdir: fs.readdir });
     const listing = { errors: 0, failed: [], disabled: [] };
-    const { found } = await listTranscripts({ fs, platform, roots: roots.filter((root) => digestible(root.kind)), extra, run: listing });
+    const { found } = await listTranscripts({ fs, platform, roots, extra, run: listing });
     progress = { done: 0, total: found.length };
     const statuses = new Map();
     let next = 0;

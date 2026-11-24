@@ -4,7 +4,11 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { summarizeQuotas } from '../src/core/omp-quotas.mjs';
+import { createOmpParser } from '../src/core/records.mjs';
 import { buildReport } from '../src/core/report.mjs';
+import { analyzeBreakdown } from '../src/core/breakdown/analyze.mjs';
+import { DEFAULT_CATALOG } from '../src/core/pricing.mjs';
+import { createDigestConsumer } from '../src/node/digest-consumer.mjs';
 import { createScanner } from '../src/node/scan.mjs';
 
 let DatabaseSync = null;
@@ -117,4 +121,40 @@ test('quotas name each account once and label its credential in every profile', 
     ['Anthropic · me@example.com', 'max', 1, [['Claude 7 Day', 0.45]]],
     ['Ollama Cloud · work #68', null, 0, []],
   ]);
+});
+
+test('Breakdown splits an omp session at the cost omp recorded and filters it by provider', () => {
+  const at = (s) => new Date(T1 + s * 1000).toISOString();
+  const reply = (id, s, content, usage, cost) => JSON.stringify({
+    type: 'message', id, timestamp: at(s),
+    message: { role: 'assistant', content, provider: 'anthropic', model: 'mystery-model', usage: { ...usage, cost: { ...cost, total: Object.values(cost).reduce((a, b) => a + b, 0) } }, timestamp: T1 + s * 1000 },
+  });
+  const lines = [
+    header('01a00000-0000-7000-8000-00000000000c', '/w/proj'),
+    JSON.stringify({ type: 'message', id: 'u1', timestamp: at(0), message: { role: 'user', content: [{ type: 'text', text: 'look' }] } }),
+    reply('a1', 1, [{ type: 'toolCall', id: 'c1', name: 'read', arguments: { path: '/w/proj/src/big.ts:1-50' } }], { input: 100, output: 50, cacheRead: 0, cacheWrite: 1000 }, { input: 0.0001, output: 0.005, cacheRead: 0, cacheWrite: 0.01 }),
+    JSON.stringify({ type: 'message', id: 'r1', timestamp: at(2), message: { role: 'toolResult', toolCallId: 'c1', toolName: 'read', content: [{ type: 'text', text: 'x'.repeat(9000) }] } }),
+    reply('a2', 3, [{ type: 'text', text: 'done' }], { input: 10, output: 20, cacheRead: 1100, cacheWrite: 3000 }, { input: 0.00001, output: 0.002, cacheRead: 0.0011, cacheWrite: 0.03 }),
+    JSON.stringify({ type: 'model_usage', id: 'm1', timestamp: at(4), purpose: 'title', provider: 'ollama-cloud', model: 'tiny', usage: { input: 500, output: 10, cacheRead: 0, cacheWrite: 0, cost: { input: 0.0005, output: 0.0001, total: 0.0006 } } }),
+    '',
+  ].join('\n');
+  const ctx = { profile: 'work', sessionId: 'file-name', home: '/home/me' };
+  const parser = createOmpParser(ctx, null);
+  parser.push(lines);
+  const consumer = createDigestConsumer({ kind: 'omp', ctx });
+  consumer.push(lines);
+  const input = { records: parser.records(), digests: [{ path: '/t/c.jsonl', compressed: false, sessionId: 'file-name', digest: consumer.digest() }], catalog: DEFAULT_CATALOG, range: '30d', now: NOW };
+  const close = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} != ${b}`);
+
+  const all = analyzeBreakdown(input);
+  close(all.totals.usageUsd, 0.04881);
+  close(all.totals.analysedUsd, 0.04881);
+  assert.deepEqual(all.totals.notAnalysed, []);
+  close(all.buckets.find((b) => b.key === 'side').usd, 0.0006);
+  const src = analyzeBreakdown({ ...input, path: ['/w/proj', 'src'] });
+  assert.deepEqual(src.nodes.map((n) => [n.label, n.kind]), [['big.ts', 'file']]);
+
+  const side = analyzeBreakdown({ ...input, providers: ['omp:ollama-cloud'] });
+  close(side.totals.usageUsd, 0.0006);
+  close(side.totals.analysedUsd, 0.0006);
 });

@@ -2,7 +2,7 @@
 // request's rows add up exactly to its usage. State and digest are plain JSON with no transcript text.
 import { bandOf } from '../bands.mjs';
 
-export const BUCKETS = Object.freeze(['startup', 'tools', 'messages', 'injected', 'replies', 'compaction', 'rebuilds', 'output', 'unattributed']);
+export const BUCKETS = Object.freeze(['startup', 'tools', 'messages', 'injected', 'replies', 'compaction', 'rebuilds', 'output', 'unattributed', 'side']);
 const B = Object.fromEntries(BUCKETS.map((name, i) => [name, i]));
 
 const IMAGE_CHARS = 6000;
@@ -60,13 +60,16 @@ export function createFold(info = {}, state = null, { adopt = false } = {}) {
       case 'request':
         onRequest(event);
         break;
+      case 'side':
+        onSide(event);
+        break;
       default:
         break;
     }
   }
 
   function onCall({ id, target, op }) {
-    if (s.harness !== 'claude' || !target?.key) return;
+    if ((s.harness !== 'claude' && s.harness !== 'omp') || !target?.key) return;
     if (op === 'read') {
       if (s.reads.includes(target.key) && id) s.repeats.push(id);
       else s.reads.push(target.key);
@@ -120,7 +123,31 @@ export function createFold(info = {}, state = null, { adopt = false } = {}) {
     s.pending = list;
   }
 
-  function onRequest({ ts, model, usage }) {
+  function onSide({ ts, model, usage, cost, target }) {
+    const u = cleanUsage(usage);
+    const at = Date.parse(ts);
+    const slot = Number.isFinite(at) ? Math.floor(at / SLOT_MS) : 0;
+    const req = { slot, model: modelIdx(model), band: bandOf(u.input + u.cacheRead + u.cacheWrite), cwd: s.cwdAt ?? 0, cells: new Map() };
+    noteRates(req, cost, u);
+    put(req, B.side, targetIdx(target ?? OWN.unattributed), 0, 0, { input: u.input, cacheRead: u.cacheRead, cw5m: u.cw5m, cw1h: u.cw1h, output: u.output });
+    commit(req);
+    s.requests++;
+    s.totalTokens += u.input + u.cacheRead + u.cacheWrite + u.output;
+    if (ts && (!s.firstTs || ts < s.firstTs)) s.firstTs = ts;
+    if (ts && (!s.lastTs || ts > s.lastTs)) s.lastTs = ts;
+  }
+
+  function noteRates(req, cost, u) {
+    if (cost === null || typeof cost !== 'object') return;
+    s.rates ??= {};
+    const key = `${req.model}|${req.band}`;
+    const rate = s.rates[key] ?? (s.rates[key] = [null, null, null, null]);
+    [[cost.input, u.input], [cost.cacheRead, u.cacheRead], [cost.cacheWrite, u.cacheWrite], [cost.output, u.output]].forEach(([usd, tokens], i) => {
+      if (tokens > 0 && typeof usd === 'number' && Number.isFinite(usd) && usd >= 0) rate[i] = usd / tokens;
+    });
+  }
+
+  function onRequest({ ts, model, usage, cost }) {
     const u = cleanUsage(usage);
     const ctx = u.input + u.cacheRead + u.cacheWrite;
     const at = Date.parse(ts);
@@ -128,6 +155,7 @@ export function createFold(info = {}, state = null, { adopt = false } = {}) {
     // 15-minute UTC slots: every real time-zone offset is a multiple of 15 minutes, so a slot falls on one local day.
     const slot = time === null ? 0 : Math.floor(time / SLOT_MS);
     const req = { slot, model: modelIdx(model), band: bandOf(ctx), cwd: s.cwdAt ?? 0, cells: new Map() };
+    noteRates(req, cost, u);
     const prev = s.prev;
 
     let fresh = []; // new context entries this turn: { b, t, n, e, rep }
@@ -351,6 +379,7 @@ export function createFold(info = {}, state = null, { adopt = false } = {}) {
       splitTokens: s.splitTokens,
       totalTokens: s.totalTokens,
       explain: s.explain === true,
+      ...(s.rates ? { rates: structuredClone(s.rates) } : {}),
       models: [...s.models],
       targets,
       rows,
