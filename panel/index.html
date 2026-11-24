@@ -432,26 +432,36 @@ button.src:disabled { cursor: progress; opacity: .7; }
 .src.off .name { font-weight: 500; text-decoration: line-through; }
 .src.off .state { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted-fg); }
 #quotas[hidden] { display: none; }
-.q-group { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; }
+.q-group { display: flex; flex-direction: column; gap: 12px; padding: 16px 0; }
+.q-group:last-child { padding-bottom: 0; }
 .q-group + .q-group { border-top: 1px solid var(--border); }
-.q-group header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-start; }
+.q-group header { display: flex; align-items: baseline; justify-content: flex-start; gap: 8px; flex-wrap: wrap; margin: 0 0 -4px; }
+.q-group header b { font-size: 13px; }
 .q-group header small { color: var(--muted-fg); font-size: 12px; }
-.q-group .sw { width: 9px; height: 9px; border-radius: 50%; }
-.q-row { display: grid; grid-template-columns: minmax(120px, 1.2fr) minmax(80px, 2fr) 84px 118px; column-gap: 12px; align-items: center; font-size: 13px; }
-.q-label { display: flex; flex-direction: column; min-width: 0; }
-.q-label small { color: var(--muted-fg); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.q-bar { height: 6px; border-radius: 999px; background: var(--accent); overflow: hidden; }
-.q-bar i { display: block; height: 100%; border-radius: inherit; background: var(--muted-fg); }
-.q-row.warm .q-bar i { background: var(--s4); }
-.q-row.hot .q-bar i { background: var(--orca-destructive, #e34948); }
-.q-left { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
-.q-reset { color: var(--muted-fg); font-size: 12px; text-align: right; white-space: nowrap; }
+.q-group .sw { width: 8px; height: 8px; border-radius: 50%; align-self: center; flex: none; }
+.q-row { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(80px, 1.6fr) 72px 104px; column-gap: 16px; align-items: center; font-size: 13px; }
+.q-label { display: flex; min-width: 0; }
+.q-label > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.q-label small { color: var(--muted-fg); font-size: 11px; white-space: nowrap; }
+.q-row { --q-tone: var(--s3); }
+.q-row.warm { --q-tone: var(--s4); }
+.q-row.hot { --q-tone: var(--orca-destructive, #e34948); }
+.q-bar { height: 6px; border-radius: 999px; background: color-mix(in srgb, var(--q-tone) 18%, transparent); overflow: hidden; }
+.q-bar i { display: block; height: 100%; border-radius: inherit; background: var(--q-tone); }
+.q-row.warm .q-left, .q-row.hot .q-left { color: color-mix(in srgb, var(--q-tone) 70%, var(--fg)); }
+.q-left { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.q-reset { color: var(--muted-fg); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 .q-error { margin: 0; color: var(--orca-destructive, #e34948); font-size: 12px; }
-.q-note { margin: 0; color: var(--muted-fg); font-size: 13px; }
+.q-note { margin: 0; color: var(--muted-fg); font-size: 12px; }
 @media (max-width: 480px) {
-  .q-row { grid-template-columns: 1fr auto; row-gap: 4px; }
-  .q-bar { grid-column: 1 / -1; grid-row: 2; }
-  .q-reset { grid-column: 1 / -1; text-align: left; }
+  .q-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; column-gap: 12px; align-items: start; }
+  .q-label > span { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .q-bar { align-self: center; }
+  .q-group header small { flex-basis: 100%; padding-left: 16px; }
+  .q-label { grid-column: 1; grid-row: 1; }
+  .q-left { grid-column: 2; grid-row: 1; }
+  .q-bar { grid-column: 1; grid-row: 2; }
+  .q-reset { grid-column: 2; grid-row: 2; font-size: 11px; }
 }
 </style>
 </head>
@@ -716,7 +726,7 @@ function trim(x) {
 // Display names per provider (the `provider` column of a usage record), for the panel, the worker and
 // Explain prompts. Pure, and bundled into the panel by scripts/build.mjs. A provider added to the
 // scanner gets its name here.
-const PROVIDER_LABELS = Object.freeze({ claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode' })
+const PROVIDER_LABELS = Object.freeze({ claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', omp: 'omp' })
 
 const OMP_PROVIDER_NAMES = Object.freeze({
   anthropic: 'Anthropic',
@@ -1272,12 +1282,13 @@ const BUCKET_INFO = {
   rebuilds: { label: 'Cache rebuilds', tip: 'Context written to the cache again after it expired, after a model switch, or after compaction.', color: 'var(--s2)' },
   output: { label: 'Output', tip: 'Tokens the model wrote: answers, tool calls and thinking.', color: 'var(--s6)' },
   unattributed: { label: 'Unattributed', tip: "Context growth the transcript doesn't explain.", color: 'var(--muted-fg)' },
+  side: { label: 'Side requests', tip: 'Small requests omp makes next to the conversation: titles, predictions, recaps and checks.', color: 'var(--q1)' },
 }
 
 const REASON_INFO = {
   ssh: { label: 'On SSH hosts', next: 'Breakdown reads transcripts on this machine only. SSH usage still counts in the total.' },
-  opencode: { label: 'OpenCode sessions', next: 'Breakdown reads Claude Code and Codex transcripts. OpenCode usage still counts in the total.' },
-  omp: { label: 'omp sessions', next: 'Breakdown reads Claude Code and Codex transcripts. omp usage still counts in the total.' },
+  opencode: { label: 'OpenCode sessions', next: 'Breakdown reads Claude Code, Codex and omp transcripts. OpenCode usage still counts in the total.' },
+  omp: { label: 'Deleted omp sessions', next: 'These requests are only in stats.db, because their session files were deleted. They count in the total but cannot be split.' },
   zstd: { label: 'Compressed Codex files', next: "This Orca's Node.js can't read .zst files. Updating Orca fixes it." },
   'too-large': { label: 'Files too large', next: 'Compressed transcripts over 64 MB are skipped.' },
   parse: { label: "Files that couldn't be read", next: 'See the This machine status above for which files failed.' },
@@ -1397,7 +1408,7 @@ function tree(view) {
 }
 
 function kindLabel(kind) {
-  return { file: 'file', command: 'command', agent: 'subagent', web: 'web', mcp: 'MCP', tool: 'tool', messages: 'message', injected: 'injected', summary: 'summary', bucket: '' }[kind] ?? ''
+  return { file: 'file', command: 'command', agent: 'subagent', web: 'web', mcp: 'MCP', tool: 'tool', messages: 'message', injected: 'injected', summary: 'summary', side: 'side request', bucket: '' }[kind] ?? ''
 }
 
 function lastSegment(path) {
@@ -2009,14 +2020,16 @@ function providerLimits(accounts) {
   return [...byLabel.values()].map((row) => ({ label: row.label, usedFraction: row.used.length ? median(row.used) : null, resetsAt: row.resetsAt, accounts: row.accounts }))
 }
 
-function limitRow(limit) {
+function limitRow(limit, total) {
   const used = limit.usedFraction
-  const width = used == null ? 0 : Math.round(used * 1000) / 10
-  const tone = (used ?? 0) >= 0.9 ? ' hot' : (used ?? 0) >= 0.7 ? ' warm' : ''
-  const sub = `${limit.accounts} account${limit.accounts === 1 ? '' : 's'}`
-  const left = used == null ? '—' : `${Math.round((1 - used) * 100)}% left`
-  const reset = !limit.resetsAt ? '' : limit.resetsAt - Date.now() < 60_000 ? 'resets soon' : `resets in ${until(limit.resetsAt)}`
-  return `<div class="q-row${tone}"><span class="q-label">${esc(limit.label)}<small>${esc(sub)}</small></span><span class="q-bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${width}" aria-label="${esc(`${limit.label}, median of ${sub}: ${left}`)}"><i style="width:${width}%"></i></span><span class="q-left">${esc(left)}</span><span class="q-reset">${esc(reset)}</span></div>`
+  const leftPct = used == null ? null : Math.max(0, Math.min(100, Math.round((1 - used) * 100)))
+  const tone = leftPct == null ? '' : leftPct <= 10 ? ' hot' : leftPct <= 30 ? ' warm' : ''
+  const raw = String(limit.label).replace(/_/g, ' ')
+  const label = raw.charAt(0).toUpperCase() + raw.slice(1)
+  const sub = limit.accounts < total ? `${limit.accounts} of ${total}` : ''
+  const left = leftPct == null ? '—' : `${leftPct}% left`
+  const reset = !limit.resetsAt ? '—' : `resets in ${limit.resetsAt - Date.now() < 60_000 ? '<1m' : until(limit.resetsAt)}`
+  return `<div class="q-row${tone}"><span class="q-label" title="${esc(sub ? `${label} · ${sub} accounts` : label)}"><span>${esc(label)}${sub ? `&nbsp;<small>·&nbsp;${esc(sub)}</small>` : ''}</span></span><span class="q-bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${leftPct ?? 0}" aria-label="${esc(`${label}: ${left}, median of ${limit.accounts} account${limit.accounts === 1 ? '' : 's'}`)}"><i style="width:${leftPct ?? 0}%"></i></span><span class="q-left">${esc(left)}</span><span class="q-reset">${esc(reset)}</span></div>`
 }
 
 function renderQuotas(q) {
@@ -2036,7 +2049,7 @@ function renderQuotas(q) {
     .map(({ accounts, limits }) => {
       const banked = accounts.reduce((n, a) => n + (a.resetsBanked || 0), 0)
       const note = accounts.find((a) => a.notes?.length)?.notes[0] || ''
-      const rows = limits.length ? limits.map(limitRow) : [`<p class="q-note"${note ? ` title="${esc(note)}"` : ''}>No quotas reported</p>`]
+      const rows = limits.length ? limits.map((limit) => limitRow(limit, accounts.length)) : [`<p class="q-note"${note ? ` title="${esc(note)}"` : ''}>No quotas reported</p>`]
       const meta = `${accounts.length} account${accounts.length === 1 ? '' : 's'}${banked ? ` · ${banked} reset${banked === 1 ? '' : 's'} banked` : ''}`
       return `<section class="q-group"><header><span class="sw" style="background:${providerColor(`omp:${accounts[0].provider}`)}"></span><b>${esc(accounts[0].providerName)}</b><small>${esc(meta)}</small></header>${rows.join('')}</section>`
     })

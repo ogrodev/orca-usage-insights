@@ -503,14 +503,16 @@ function providerLimits(accounts) {
   return [...byLabel.values()].map((row) => ({ label: row.label, usedFraction: row.used.length ? median(row.used) : null, resetsAt: row.resetsAt, accounts: row.accounts }))
 }
 
-function limitRow(limit) {
+function limitRow(limit, total) {
   const used = limit.usedFraction
-  const width = used == null ? 0 : Math.round(used * 1000) / 10
-  const tone = (used ?? 0) >= 0.9 ? ' hot' : (used ?? 0) >= 0.7 ? ' warm' : ''
-  const sub = `${limit.accounts} account${limit.accounts === 1 ? '' : 's'}`
-  const left = used == null ? '—' : `${Math.round((1 - used) * 100)}% left`
-  const reset = !limit.resetsAt ? '' : limit.resetsAt - Date.now() < 60_000 ? 'resets soon' : `resets in ${until(limit.resetsAt)}`
-  return `<div class="q-row${tone}"><span class="q-label">${esc(limit.label)}<small>${esc(sub)}</small></span><span class="q-bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${width}" aria-label="${esc(`${limit.label}, median of ${sub}: ${left}`)}"><i style="width:${width}%"></i></span><span class="q-left">${esc(left)}</span><span class="q-reset">${esc(reset)}</span></div>`
+  const leftPct = used == null ? null : Math.max(0, Math.min(100, Math.round((1 - used) * 100)))
+  const tone = leftPct == null ? '' : leftPct <= 10 ? ' hot' : leftPct <= 30 ? ' warm' : ''
+  const raw = String(limit.label).replace(/_/g, ' ')
+  const label = raw.charAt(0).toUpperCase() + raw.slice(1)
+  const sub = limit.accounts < total ? `${limit.accounts} of ${total}` : ''
+  const left = leftPct == null ? '—' : `${leftPct}% left`
+  const reset = !limit.resetsAt ? '—' : `resets in ${limit.resetsAt - Date.now() < 60_000 ? '<1m' : until(limit.resetsAt)}`
+  return `<div class="q-row${tone}"><span class="q-label" title="${esc(sub ? `${label} · ${sub} accounts` : label)}"><span>${esc(label)}${sub ? `&nbsp;<small>·&nbsp;${esc(sub)}</small>` : ''}</span></span><span class="q-bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${leftPct ?? 0}" aria-label="${esc(`${label}: ${left}, median of ${limit.accounts} account${limit.accounts === 1 ? '' : 's'}`)}"><i style="width:${leftPct ?? 0}%"></i></span><span class="q-left">${esc(left)}</span><span class="q-reset">${esc(reset)}</span></div>`
 }
 
 function renderQuotas(q) {
@@ -530,7 +532,7 @@ function renderQuotas(q) {
     .map(({ accounts, limits }) => {
       const banked = accounts.reduce((n, a) => n + (a.resetsBanked || 0), 0)
       const note = accounts.find((a) => a.notes?.length)?.notes[0] || ''
-      const rows = limits.length ? limits.map(limitRow) : [`<p class="q-note"${note ? ` title="${esc(note)}"` : ''}>No quotas reported</p>`]
+      const rows = limits.length ? limits.map((limit) => limitRow(limit, accounts.length)) : [`<p class="q-note"${note ? ` title="${esc(note)}"` : ''}>No quotas reported</p>`]
       const meta = `${accounts.length} account${accounts.length === 1 ? '' : 's'}${banked ? ` · ${banked} reset${banked === 1 ? '' : 's'} banked` : ''}`
       return `<section class="q-group"><header><span class="sw" style="background:${providerColor(`omp:${accounts[0].provider}`)}"></span><b>${esc(accounts[0].providerName)}</b><small>${esc(meta)}</small></header>${rows.join('')}</section>`
     })
