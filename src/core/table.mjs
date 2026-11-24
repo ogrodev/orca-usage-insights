@@ -6,8 +6,8 @@
 import { timestampParser } from './time.mjs';
 
 export const TOKEN_FIELDS = Object.freeze(['input', 'output', 'cacheRead', 'cacheWrite', 'cacheWrite1h']);
-export const NAME_FIELDS = Object.freeze(['provider', 'model', 'project', 'sessionId', 'cwd', 'host']);
-export const COLUMNS = Object.freeze(['ms', ...TOKEN_FIELDS, ...NAME_FIELDS]);
+export const NAME_FIELDS = Object.freeze(['provider', 'model', 'project', 'sessionId', 'cwd', 'host', 'account']);
+export const COLUMNS = Object.freeze(['ms', ...TOKEN_FIELDS, 'cost', ...NAME_FIELDS]);
 const U32_MAX = 0xffffffff;
 // Past this many replaced rows the log restarts under a new epoch; a reader on the old one rereads the table.
 const REPLACED_LOG_MAX = 4096;
@@ -46,12 +46,14 @@ export class RecordTable {
     this.cacheRead = new Uint32Array(capacity);
     this.cacheWrite = new Uint32Array(capacity);
     this.cacheWrite1h = new Uint32Array(capacity);
+    this.cost = new Float64Array(capacity);
     this.provider = new Int32Array(capacity);
     this.model = new Int32Array(capacity);
     this.project = new Int32Array(capacity);
     this.sessionId = new Int32Array(capacity);
     this.cwd = new Int32Array(capacity);
     this.host = new Int32Array(capacity);
+    this.account = new Int32Array(capacity);
     this.keys = [];
     this.frozen = false; // true once no row will change (merge output, a conversion)
     this.version = 0;
@@ -63,18 +65,18 @@ export class RecordTable {
     return this.dict.list;
   }
 
-  push(key, ms, provider, model, project, sessionId, cwd, host, input, output, cacheRead, cacheWrite, cacheWrite1h) {
+  push(key, ms, provider, model, project, sessionId, cwd, host, input, output, cacheRead, cacheWrite, cacheWrite1h, account, cost) {
     const i = this.length;
     if (i === this.ms.length) this.grow(Math.max(16, i * 2));
     this.length = i + 1;
     this.keys.push(typeof key === 'string' ? key : undefined);
-    this.write(i, ms, provider, model, project, sessionId, cwd, host, input, output, cacheRead, cacheWrite, cacheWrite1h);
+    this.write(i, ms, provider, model, project, sessionId, cwd, host, input, output, cacheRead, cacheWrite, cacheWrite1h, account, cost);
     this.version++;
     return i;
   }
 
-  replace(i, ms, provider, model, project, sessionId, cwd, host, input, output, cacheRead, cacheWrite, cacheWrite1h) {
-    this.write(i, ms, provider, model, project, sessionId, cwd, host, input, output, cacheRead, cacheWrite, cacheWrite1h);
+  replace(i, ms, provider, model, project, sessionId, cwd, host, input, output, cacheRead, cacheWrite, cacheWrite1h, account, cost) {
+    this.write(i, ms, provider, model, project, sessionId, cwd, host, input, output, cacheRead, cacheWrite, cacheWrite1h, account, cost);
     this.version++;
     if (this.replaced.length >= REPLACED_LOG_MAX) {
       this.replaced = [];
@@ -83,7 +85,7 @@ export class RecordTable {
     this.replaced.push(i);
   }
 
-  write(i, ms, provider, model, project, sessionId, cwd, host, input, output, cacheRead, cacheWrite, cacheWrite1h) {
+  write(i, ms, provider, model, project, sessionId, cwd, host, input, output, cacheRead, cacheWrite, cacheWrite1h, account, cost) {
     const dict = this.dict;
     this.ms[i] = ms;
     this.provider[i] = dict.id(provider);
@@ -92,6 +94,8 @@ export class RecordTable {
     this.sessionId[i] = dict.id(sessionId);
     this.cwd[i] = dict.id(cwd);
     this.host[i] = dict.id(host);
+    this.account[i] = dict.id(account);
+    this.cost[i] = typeof cost === 'number' ? cost : NaN;
     this.setCount('input', i, input);
     this.setCount('output', i, output);
     this.setCount('cacheRead', i, cacheRead);
@@ -152,6 +156,8 @@ export class RecordTable {
     for (const field of TOKEN_FIELDS) record[field] = this[field][i];
     add('cwd');
     add('host');
+    add('account');
+    if (!Number.isNaN(this.cost[i])) record.cost = this.cost[i];
     return record;
   }
 
@@ -167,7 +173,7 @@ export function tableFromRecords(records, dict) {
   const table = new RecordTable(records.length, dict instanceof NameDict ? dict : new NameDict());
   const parse = timestampParser();
   for (const r of records) {
-    table.push(r.key, parse(r.ts), r.provider, r.model, r.project, r.sessionId, r.cwd, r.host, r.input, r.output, r.cacheRead, r.cacheWrite, r.cacheWrite1h);
+    table.push(r.key, parse(r.ts), r.provider, r.model, r.project, r.sessionId, r.cwd, r.host, r.input, r.output, r.cacheRead, r.cacheWrite, r.cacheWrite1h, r.account, r.cost);
   }
   table.frozen = true;
   return table;

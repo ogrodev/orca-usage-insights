@@ -2,9 +2,9 @@
   "manifestVersion": 2,
   "id": "usage-insights",
   "name": "Usage Insights",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "execution": "trusted-worker",
-  "description": "Charts of your Claude Code, Codex and OpenCode token use and estimated API cost by day, project, model and machine, plus a Breakdown of what the spend went on, down to the file or command, with prompts your agent can use to explain the costly patterns. Reads local transcripts and any SSH hosts you add.",
+  "description": "Charts of your Claude Code, Codex, OpenCode and omp token use and estimated API cost by day, project, model, provider, account and machine, plus omp quotas and a Breakdown of what the spend went on, down to the file or command, with prompts your agent can use to explain the costly patterns. Reads local transcripts, omp sessions and stats, and any SSH hosts you add.",
   "author": {
     "name": "Etherll",
     "url": "https://github.com/Etherll"
@@ -83,6 +83,14 @@
         "multiline": true,
         "default": "",
         "placeholder": "~/.codex"
+      },
+      {
+        "key": "ompCommand",
+        "title": "omp command",
+        "description": "Path to the omp program, used for quotas and account names (omp usage --json). Leave empty to use omp on PATH or ~/.local/bin/omp.",
+        "type": "string",
+        "default": "",
+        "placeholder": "~/.local/bin/omp"
       },
       {
         "key": "defaultRange",

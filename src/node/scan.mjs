@@ -10,6 +10,7 @@ import { NameDict } from '../core/table.mjs';
 import { PROVIDERS } from '../core/providers.mjs';
 import { MARKER_BYTES, createRecordsConsumer, markedLines } from './lines.mjs';
 import { createOpencodeSource } from './opencode-source.mjs';
+import { createOmpStatsSource } from './omp-stats.mjs';
 import { createParsePool } from './parse-pool.mjs';
 import { pathFor, rootSpecs } from './paths.mjs';
 import { listTranscripts, readTranscript } from './transcript-files.mjs';
@@ -18,6 +19,7 @@ export { markedLines };
 
 const CACHE_VERSION = 6;
 const OPENCODE_CACHE_FILE = 'opencode-cache-v1.json';
+const OMP_STATS_CACHE_FILE = 'omp-stats-cache-v1.json';
 // Earlier caches, read when there is no current one. Their Claude entries carry over unread (parsers convert
 // pre-columns states); Codex files are read again, as their keys predate turn-based identity.
 const LEGACY_CACHE_VERSIONS = new Set([4, 5]);
@@ -40,6 +42,7 @@ export function createScanner({
   cacheFile,
   legacyCacheFile = null, // a path or a list of paths, newest first
   opencodeCacheFile = cacheFile ? pathFor(platform).join(pathFor(platform).dirname(cacheFile), OPENCODE_CACHE_FILE) : null,
+  ompStatsCacheFile = cacheFile ? pathFor(platform).join(pathFor(platform).dirname(cacheFile), OMP_STATS_CACHE_FILE) : null,
   concurrency = 8,
   // Threads that parse files read whole for the first time (first open, rewritten files).
   // 0 parses on the calling thread. Tail reads always parse inline: they are small.
@@ -58,6 +61,7 @@ export function createScanner({
   let store = createRecordStore({ names });
   // OpenCode databases are a second kind of source; their tables intern into the same dictionary.
   const opencode = createOpencodeSource({ platform, env, home, fs, names, cacheFile: opencodeCacheFile });
+  const ompStats = createOmpStatsSource({ fs, names, cacheFile: ompStatsCacheFile });
   let extra = { claude: [], codex: [], disabled: [] }; // folders from settings, see setExtraRoots
   let extraKey = '[[],[],[]]';
   let rootsGen = 0;
@@ -124,6 +128,7 @@ export function createScanner({
     generation++;
     files = new Map();
     opencode.reset();
+    ompStats.reset();
     store = createRecordStore({ names });
     baseGen = null;
     loaded = true;
@@ -156,6 +161,13 @@ export function createScanner({
     const opencodeRun = await opencode.scan({ force, disabled: folderSpecs.disabled });
     run.errors += opencodeRun.errors;
     if (opencodeRun.changed) run.changed = true;
+    const ompProfiles = new Map(roots.filter((root) => root.kind === 'omp' && root.profile).map((root) => [root.path, root.profile]));
+    const ompRoots = folders
+      .filter((folder) => ompProfiles.has(folder.path) && folder.state !== 'off' && folder.state !== 'empty')
+      .map((folder) => ({ profile: ompProfiles.get(folder.path), path: p.join(p.dirname(folder.path), 'stats.db') }));
+    const ompRun = await ompStats.scan({ roots: ompRoots });
+    run.errors += ompRun.errors;
+    if (ompRun.changed) run.changed = true;
     const walked = new Set(found.map((file) => file.path));
     // Cached files under a turned-off folder stay cached, so turning it on again reads only what changed.
     const off = (path) => !walked.has(path) && underAny(run.disabled, path, p.sep);
@@ -175,7 +187,7 @@ export function createScanner({
       }
       sources.push({ id: path, table: entry.parser.table() });
     }
-    sources.push(...opencodeRun.sources);
+    sources.push(...opencodeRun.sources, ...ompRun.sources);
     const records = store.update(sources);
     // Each root counts every file it reaches, shared ones included, and the cached files under a dir of it
     // that failed to list.
@@ -384,7 +396,7 @@ export function createScanner({
   }
 
   function persist() {
-    const job = saveChain.then(writeCache).then(() => opencode.flush());
+    const job = saveChain.then(writeCache).then(() => opencode.flush()).then(() => ompStats.flush());
     saveChain = job.catch(() => {});
     return job;
   }

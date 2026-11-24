@@ -2,6 +2,7 @@
 // settings and workspace hooks. This is the only file that knows Orca and the core together.
 // Every hook is best-effort: failures go to orca.log and never take the worker down.
 import { createHash } from 'node:crypto';
+import fsp from 'node:fs/promises';
 import { join } from 'node:path';
 import v8 from 'node:v8';
 import vm from 'node:vm';
@@ -13,12 +14,14 @@ import { asTable, distinctNames } from './core/table.mjs';
 import { analyzeBreakdown } from './core/breakdown/analyze.mjs';
 import { buildExplainPrompt } from './core/breakdown/explain.mjs';
 import { providerLabel } from './core/provider-names.mjs';
+import { summarizeQuotas } from './core/omp-quotas.mjs';
 import { createDigestScanner } from './node/digest-scan.mjs';
 import { zstdAvailable } from './node/zstd.mjs';
 import { cacheDir, homeDir, pathFor } from './node/paths.mjs';
 import { createPriceBook } from './node/price-book.mjs';
 import { createScanner } from './node/scan.mjs';
 import { createSshSource } from './node/ssh-source.mjs';
+import { ompUsage as runOmpUsage } from './node/omp-cli.mjs';
 
 const SCOPES = new Set(['all', 'worktrees']);
 const CACHE_FILE = 'scan-cache-v6.json';
@@ -34,6 +37,8 @@ const BREAKDOWN_WAIT_MS = 10_000;
 const HEAVY_MS = 1_000;
 const SETTLE_MS = 3_000;
 const VIEWS_KEPT = 8;
+const OMP_QUOTA_TTL_MS = 60_000;
+const OMP_ACCOUNTS_FILE = 'omp-accounts-v1.json';
 
 // activate, replaceWorker and deactivate run one at a time, so a new worker always starts after
 // the previous one has stopped.
@@ -97,6 +102,8 @@ export function startWorker(orca, scanner, {
   }),
   makeDigestScanner = () => createDigestScanner({ cacheDir: sshCacheDir ? join(sshCacheDir, 'digests-v1') : null, home, platform, sharedPool: scanner.pool?.() ?? null }),
   breakdownWaitMs = BREAKDOWN_WAIT_MS,
+  ompUsage = runOmpUsage,
+  ompAccountsFile = sshCacheDir ? join(sshCacheDir, OMP_ACCOUNTS_FILE) : null,
 } = {}) {
   const paths = pathFor(platform);
   let cache = { records: null, day: null, reports: new Map() };
@@ -120,6 +127,12 @@ export function startWorker(orca, scanner, {
   let digestWaiting = false;
   const views = new Map(); // filter key -> latest BreakdownView, for Explain
   let gcTimer = null;
+  let ompProfiles = null;
+  const accountLabels = new Map();
+  let labelsVersion = 0;
+  let labelsLoaded = null;
+  let quotas = null;
+  let quotasJob = null;
 
   // Handler scans are tracked so stop() can wait for them before it flushes the cache.
   function track(run) {
@@ -137,6 +150,74 @@ export function startWorker(orca, scanner, {
   orca.panels.handle('usage.breakdown', (input) => track(async () => breakdown(parseBreakdownInput(input, now()))));
   orca.panels.handle('usage.explain', (input) => track(async () => explain(parseExplainInput(input, now()))));
   orca.panels.handle('sources.toggle', (input) => track(async () => toggleSource(parseToggleInput(input))));
+
+  function loadLabels() {
+    labelsLoaded ??= (async () => {
+      if (!ompAccountsFile) return;
+      try {
+        const raw = JSON.parse(await fsp.readFile(ompAccountsFile, 'utf8'));
+        if (raw?.v !== 1 || !raw.labels || typeof raw.labels !== 'object') return;
+        for (const [key, label] of Object.entries(raw.labels)) if (typeof label === 'string' && !accountLabels.has(key)) accountLabels.set(key, label);
+        labelsVersion++;
+      } catch {}
+    })();
+    return labelsLoaded;
+  }
+
+  async function learnLabels(next) {
+    await loadLabels();
+    let changed = false;
+    for (const [key, label] of next) {
+      if (accountLabels.get(key) === label) continue;
+      accountLabels.set(key, label);
+      changed = true;
+    }
+    if (!changed) return false;
+    labelsVersion++;
+    if (ompAccountsFile) {
+      const tmp = `${ompAccountsFile}.${process.pid}.tmp`;
+      try {
+        await fsp.writeFile(tmp, JSON.stringify({ v: 1, labels: Object.fromEntries(accountLabels) }));
+        await fsp.rename(tmp, ompAccountsFile);
+      } catch (error) {
+        orca.log(`Usage Insights: could not save omp account names: ${shortMessage(error)}`);
+      }
+    }
+    return true;
+  }
+
+  function quotasNow(force) {
+    const stale = !quotas || now().getTime() - quotas.at >= OMP_QUOTA_TTL_MS;
+    if ((force || stale) && !quotasJob) {
+      quotasJob = fetchQuotas()
+        .catch((error) => orca.log(`Usage Insights: omp quotas failed: ${shortMessage(error)}`))
+        .finally(() => {
+          quotasJob = null;
+        });
+    }
+    return quotas?.value ?? null;
+  }
+
+  async function fetchQuotas() {
+    const profiles = ompProfiles ?? [];
+    if (profiles.length === 0) {
+      quotas = { at: now().getTime(), value: null };
+      return;
+    }
+    const results = await Promise.all(profiles.map(async (profile) => {
+      try {
+        return { profile, data: await ompUsage(profile, { command: expandHome(settingText(lastSettings?.ompCommand), { platform, home }), home }) };
+      } catch (error) {
+        return { profile, error: shortMessage(error) };
+      }
+    }));
+    const { accounts, labels, errors } = summarizeQuotas(results);
+    const before = JSON.stringify(quotas?.value ? [quotas.value.accounts, quotas.value.errors] : null);
+    const value = { generatedAt: now().toISOString(), accounts, errors };
+    quotas = { at: now().getTime(), value };
+    const relabeled = await learnLabels(labels);
+    if (relabeled || before !== JSON.stringify([accounts, errors])) notify('usage.changed', { generatedAt: value.generatedAt });
+  }
 
   // The digest scan runs only from here, never from the poll or the agent rescan.
   async function breakdown(options, { waitMs = breakdownWaitMs } = {}) {
@@ -287,6 +368,7 @@ export function startWorker(orca, scanner, {
       gather({ force, detach: false }),
       scopeFor(options.scope),
       priceBook.catalog(),
+      loadLabels(),
     ]);
     const report = reportFor(gathered.records, {
       range: options.range,
@@ -296,29 +378,31 @@ export function startWorker(orca, scanner, {
       includeCache: options.includeCache,
       providers: options.providers,
       hosts: options.hosts,
+      accounts: options.accounts,
       scope: scope.scope,
       catalog,
     });
     // Sources are attached per request, not cached with the report, because their state changes.
-    return { ...report, sources: gathered.statuses, ...(scope.scopeError ? { scopeError: scope.scopeError } : {}) };
+    return { ...report, sources: gathered.statuses, quotas: quotasNow(force), ...(scope.scopeError ? { scopeError: scope.scopeError } : {}) };
   }
 
   // Reports are kept per request shape for as long as the records they came from are current and the
   // local day is the same (ranges, the calendar and today's total move at midnight). The merged records
   // array is reused while its inputs are, so an unchanged request is a cache hit.
-  function reportFor(records, { range, startDate, endDate, models, includeCache = true, providers, hosts, scope, catalog }) {
+  function reportFor(records, { range, startDate, endDate, models, includeCache = true, providers, hosts, accounts, scope, catalog }) {
     const at = now();
     const day = localDayKey(at);
     if (cache.records !== records || cache.day !== day) cache = { records, day, reports: new Map() };
-    const key = JSON.stringify([range, startDate ?? null, endDate ?? null, models ?? null, includeCache, providers ?? null, hosts ?? null, scope ?? null, catalog.version]);
+    const key = JSON.stringify([range, startDate ?? null, endDate ?? null, models ?? null, includeCache, providers ?? null, hosts ?? null, accounts ?? null, scope ?? null, catalog.version, labelsVersion]);
     let report = cache.reports.get(key);
     if (!report) {
-      const options = { range, now: at, catalog, includeCache };
+      const options = { range, now: at, catalog, includeCache, accountLabels };
       if (startDate !== undefined) options.startDate = startDate;
       if (endDate !== undefined) options.endDate = endDate;
       if (models !== undefined) options.models = models;
       if (providers !== undefined) options.providers = providers;
       if (hosts !== undefined) options.hosts = hosts;
+      if (accounts !== undefined) options.accounts = accounts;
       if (scope !== undefined) options.scope = scope;
       report = build(records, options);
       cache.reports.set(key, report);
@@ -535,6 +619,7 @@ export function startWorker(orca, scanner, {
     if (tooLarge > 0) notes.push(`${tooLarge} compressed Codex ${tooLarge === 1 ? 'file' : 'files'} skipped: too large`);
     if (notes.length > 0) Object.assign(local, { state: 'warning', message: notes.join('; ') });
     // Every transcript root: the defaults, environment and Orca account homes, and the extra folders.
+    ompProfiles = (result.folders ?? []).filter((folder) => folder.kind === 'omp' && folder.state === 'ok').map((folder) => ompProfileOf(folder.path));
     const folders = (result.folders ?? []).map((folder) => ({
       id: `folder:${folder.path}`,
       kind: 'folder',
@@ -734,6 +819,15 @@ function settingLines(value) {
     .filter((line) => line !== '' && !line.startsWith('#'));
 }
 
+function settingText(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function ompProfileOf(agentDir) {
+  const parts = String(agentDir).split(/[\\/]+/).filter(Boolean);
+  return parts.at(-3) === 'profiles' ? parts.at(-2) : 'default';
+}
+
 // Input from the panel: { range?, startDate?, endDate?, models?, includeCache?, providers?, scope?, hosts? }
 // (query fields as in query.mjs). Anything malformed is rejected with code invalid_params.
 function parseReportInput(input, at = new Date()) {
@@ -761,6 +855,12 @@ function parseReportInput(input, at = new Date()) {
       throw invalidParams('hosts must be an array of non-empty strings');
     }
     out.hosts = body.hosts;
+  }
+  if (body.accounts !== undefined) {
+    if (!Array.isArray(body.accounts) || !body.accounts.every((account) => typeof account === 'string' && account !== '')) {
+      throw invalidParams('accounts must be an array of non-empty strings');
+    }
+    out.accounts = body.accounts;
   }
   return out;
 }

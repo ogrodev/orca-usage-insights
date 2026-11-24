@@ -191,7 +191,7 @@ test('manifest is the trusted worker with exactly the declared keys', () => {
 
 test('manifest declares the source settings as multiline strings', () => {
   const manifest = JSON.parse(readFileSync(path.join(root, 'orca-plugin.json'), 'utf8'))
-  assert.deepEqual(manifest.contributes.settings.map((s) => s.key), ['extraClaudeFolders', 'extraCodexFolders', 'sshHosts', 'disabledFolders', 'defaultRange'])
+  assert.deepEqual(manifest.contributes.settings.map((s) => s.key), ['extraClaudeFolders', 'extraCodexFolders', 'sshHosts', 'disabledFolders', 'ompCommand', 'defaultRange'])
   for (const setting of manifest.contributes.settings.slice(0, 4)) {
     assert.deepEqual(Object.keys(setting), ['key', 'title', 'description', 'type', 'multiline', 'default', 'placeholder'])
     assert.equal(setting.type, 'string')

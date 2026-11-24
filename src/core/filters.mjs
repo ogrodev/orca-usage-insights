@@ -1,5 +1,6 @@
 // Pure: no Node built-in or Orca imports. Records with a bad timestamp or a day after `now` belong to no window.
 
+import { accountLabel } from './provider-names.mjs';
 import { RANGE_DAYS, dayKey, localDay, parseDateDay } from './query.mjs';
 import { asTable } from './table.mjs';
 import { localClock } from './time.mjs';
@@ -14,7 +15,7 @@ const HOUR_MS = 3_600_000;
 // Rows run to today whatever the range, so streaks and the calendar see every day; the range is
 // startDay..endDay. For 'all', `startDay` is the earliest kept day, or today. 'custom' takes
 // inclusive local `startDate` and `endDate` (YYYY-MM-DD).
-export function selectRecords(records, { range, startDate, endDate, models, now = new Date(), providers, hosts, scope } = {}) {
+export function selectRecords(records, { range, startDate, endDate, models, now = new Date(), providers, hosts, scope, accounts, accountLabels } = {}) {
   if (range !== 'all' && range !== 'custom' && !RANGE_DAYS.has(range)) throw new RangeError(`Unknown range: ${range}`);
   const table = asTable(records);
   const { names, length } = table;
@@ -36,6 +37,11 @@ export function selectRecords(records, { range, startDate, endDate, models, now 
     hostOk[id + 1] = !allowedHosts || allowedHosts.has(hostNames[id + 1]) ? 1 : 0;
     modelOk[id + 1] = !allowedModels || allowedModels.has(nameOf(id)) ? 1 : 0;
   }
+  const allowedAccounts = accounts ? new Set(accounts) : null;
+  const accountNames = new Array(names.length + 1);
+  const accountOf = (a) => (a <= 0 ? undefined : (accountNames[a] ??= accountLabel(names[a - 1], accountLabels)));
+  const accountSeen = new Uint8Array(names.length + 1);
+  const allAccounts = new Set();
   const matchesScope = scopeMatcher(scope);
   const cwdOk = new Int8Array(names.length + 1).fill(-1); // -1: not decided yet
 
@@ -50,7 +56,7 @@ export function selectRecords(records, { range, startDate, endDate, models, now 
   const rows = new Int32Array(length);
   const days = new Int32Array(length);
   const slots = new Uint8Array(length);
-  const { provider, host, cwd, ms, model } = table;
+  const { provider, host, cwd, ms, model, account } = table;
   let count = 0;
   let earliest = today;
   for (let i = 0; i < length; i++) {
@@ -65,6 +71,12 @@ export function selectRecords(records, { range, startDate, endDate, models, now 
       allHosts.add(hostNames[h]);
     }
     if (providerOk[p] === 0 || hostOk[h] === 0) continue;
+    const a = account[i] + 1;
+    if (accountSeen[a] === 0) {
+      accountSeen[a] = 1;
+      if (a > 0) allAccounts.add(accountOf(a));
+    }
+    if (allowedAccounts && (a === 0 || !allowedAccounts.has(accountOf(a)))) continue;
     const c = cwd[i] + 1;
     let inScope = cwdOk[c];
     if (inScope === -1) inScope = cwdOk[c] = matchesScope(nameOf(c - 1)) ? 1 : 0;
@@ -93,7 +105,7 @@ export function selectRecords(records, { range, startDate, endDate, models, now 
   }
   const startDay = range === 'custom' ? parseDateDay(startDate) : range === 'all' ? earliest : today - (RANGE_DAYS.get(range) - 1);
   const endDay = range === 'custom' ? parseDateDay(endDate) : today;
-  return { table, rows, days, slots, count, hostNames, today, startDay, endDay, allProviders, allHosts, allModels, rowProviders };
+  return { table, rows, days, slots, count, hostNames, accountOf, today, startDay, endDay, allProviders, allHosts, allAccounts, allModels, rowProviders };
 }
 
 // At a segment boundary ('/a/b' is not under '/a/bc'). Empty cwds never match; with no scope every cwd is in.

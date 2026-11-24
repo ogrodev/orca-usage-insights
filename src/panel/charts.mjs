@@ -1,10 +1,10 @@
 // Pure SVG-string chart builders. Each takes a slice of the Report and returns markup.
 // Colors are CSS variables defined in panel.css, so light/dark switch without re-rendering.
 import { compact } from '../core/format.mjs'
-import { PROVIDER_LABELS } from '../core/provider-names.mjs'
+import { providerLabel } from '../core/provider-names.mjs'
 
 // panel.js reads these from here. build.mjs drops this line, since both modules are bundled once.
-export { compact, PROVIDER_LABELS }
+export { compact, providerLabel }
 
 export const TOKEN_KEYS = ['input', 'output', 'cacheRead', 'cacheWrite']
 export const TOKEN_LABELS = { input: 'Input', output: 'Output', cacheRead: 'Cache read', cacheWrite: 'Cache write' }
@@ -232,8 +232,8 @@ export function sparkline(values, { width = 96, height = 26 } = {}) {
   return svg(width, height, `<polyline points="${d}" fill="none" class="spark" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${lx}" cy="${ly}" r="2.5" class="spark-dot"/>`, 'Trend')
 }
 
-export const PROVIDER_COLORS = { claude: 'var(--s2)', codex: 'var(--s1)', opencode: 'var(--s3)' }
-export const providerColor = (p, i = 0) => PROVIDER_COLORS[p] ?? ['var(--s3)', 'var(--s4)', 'var(--s5)'][i % 3]
+export const PROVIDER_COLORS = { claude: 'var(--s2)', codex: 'var(--s1)', opencode: 'var(--s3)', 'omp:anthropic': 'var(--s6)', 'omp:openai-codex': 'var(--s5)', 'omp:ollama-cloud': 'var(--s4)' }
+export const providerColor = (p) => PROVIDER_COLORS[p] ?? 'var(--s7)'
 
 // Monotone cubic (Fritsch–Carlson) path through points, so smoothing never overshoots below 0.
 export function smoothPath(pts) {
@@ -312,7 +312,7 @@ export function areaTrend(series, { metric = 'total', width = 420, height = 200,
   // Hover columns: one per day, crosshair + every provider's value.
   const col = days.length > 1 ? plotW / (days.length - 1) : plotW
   days.forEach((day, j) => {
-    const rows = live.map((s) => [PROVIDER_LABELS[s.provider] ?? s.provider, fmt(Number(s.daily[j]?.[metric]) || 0)])
+    const rows = live.map((s) => [providerLabel(s.provider), fmt(Number(s.daily[j]?.[metric]) || 0)])
     const tip = esc(JSON.stringify({ title: shortDay(day), rows }))
     const cx = x(j)
     body += `<g class="mark xhair" data-tip="${tip}"><rect x="${Math.max(left, cx - col / 2)}" y="${top}" width="${col}" height="${plotH}" class="hit"/><line x1="${cx}" x2="${cx}" y1="${top}" y2="${top + plotH}" class="xline"/>`

@@ -110,7 +110,7 @@ export async function listTranscripts({ fs, platform = process.platform, roots, 
     const errorsBefore = run.errors;
     const top = await canonicalDir(fs, folder);
     if (top === null) {
-      Object.assign(entry, source === 'default' ? { state: 'empty' } : { state: 'warning', message: 'Folder not found' });
+      Object.assign(entry, source === 'default' || source === 'omp' ? { state: 'empty' } : { state: 'warning', message: 'Folder not found' });
       continue;
     }
     if (source === 'extra') {
@@ -152,7 +152,7 @@ export async function listTranscripts({ fs, platform = process.platform, roots, 
         out.push({
           path,
           kind,
-          ctx: { sessionId: p.basename(path).replace(TRANSCRIPT, ''), project: p.basename(p.dirname(path)) },
+          ctx: { sessionId: p.basename(path).replace(TRANSCRIPT, ''), project: p.basename(p.dirname(path)), ...(spec.profile ? { profile: spec.profile } : {}) },
           compressed: COMPRESSED.test(path),
           fileId: inodeOf(fileStat),
         });

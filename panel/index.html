@@ -431,6 +431,28 @@ button.src:disabled { cursor: progress; opacity: .7; }
 .src.off { color: var(--muted-fg); border-style: dashed; }
 .src.off .name { font-weight: 500; text-decoration: line-through; }
 .src.off .state { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted-fg); }
+#quotas[hidden] { display: none; }
+.q-group { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; }
+.q-group + .q-group { border-top: 1px solid var(--border); }
+.q-group header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-start; }
+.q-group header small { color: var(--muted-fg); font-size: 12px; }
+.q-group .sw { width: 9px; height: 9px; border-radius: 50%; }
+.q-row { display: grid; grid-template-columns: minmax(120px, 1.2fr) minmax(80px, 2fr) 84px 118px; column-gap: 12px; align-items: center; font-size: 13px; }
+.q-label { display: flex; flex-direction: column; min-width: 0; }
+.q-label small { color: var(--muted-fg); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.q-bar { height: 6px; border-radius: 999px; background: var(--accent); overflow: hidden; }
+.q-bar i { display: block; height: 100%; border-radius: inherit; background: var(--muted-fg); }
+.q-row.warm .q-bar i { background: var(--s4); }
+.q-row.hot .q-bar i { background: var(--orca-destructive, #e34948); }
+.q-left { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+.q-reset { color: var(--muted-fg); font-size: 12px; text-align: right; white-space: nowrap; }
+.q-error { margin: 0; color: var(--orca-destructive, #e34948); font-size: 12px; }
+.q-note { margin: 0; color: var(--muted-fg); font-size: 13px; }
+@media (max-width: 480px) {
+  .q-row { grid-template-columns: 1fr auto; row-gap: 4px; }
+  .q-bar { grid-column: 1 / -1; grid-row: 2; }
+  .q-reset { grid-column: 1 / -1; text-align: left; }
+}
 </style>
 </head>
 <body>
@@ -439,7 +461,7 @@ button.src:disabled { cursor: progress; opacity: .7; }
     <div id="banner" class="banner-wrap"></div>
     <div class="hero-text">
       <h1>Usage Insights</h1>
-      <p id="updated" class="muted">Reading your Claude Code, Codex and OpenCode usage…</p>
+      <p id="updated" class="muted">Reading your Claude Code, Codex, OpenCode and omp usage…</p>
     </div>
     <div class="hero-stat"><strong id="hero-total"></strong><span id="hero-sub" class="muted"></span></div>
   </section>
@@ -470,6 +492,10 @@ button.src:disabled { cursor: progress; opacity: .7; }
         <section class="pop-section" id="sec-providers" hidden>
           <h3 class="pop-title" id="providers-title">Provider</h3>
           <div class="opt-list" role="radiogroup" aria-labelledby="providers-title" id="providers"></div>
+        </section>
+        <section class="pop-section" id="sec-accounts" hidden>
+          <h3 class="pop-title" id="accounts-title">Account</h3>
+          <div class="opt-list" role="radiogroup" aria-labelledby="accounts-title" id="accounts"></div>
         </section>
         <section class="pop-section" id="sec-models">
           <h3 class="pop-title" id="models-title">Models</h3>
@@ -514,6 +540,11 @@ button.src:disabled { cursor: progress; opacity: .7; }
   <section id="content" hidden>
     <div class="tiles" id="tiles"></div>
 
+    <article class="card" id="quotas" hidden>
+      <header><h2>Quotas</h2><span class="muted small" id="quotas-sub"></span></header>
+      <div id="quotas-body"></div>
+    </article>
+
     <article class="card">
       <div class="overview">
         <div class="ov-left">
@@ -521,6 +552,7 @@ button.src:disabled { cursor: progress; opacity: .7; }
           <p class="muted" id="ov-sessions"></p>
           <ul class="prov-list" id="ov-providers"></ul>
           <ul class="prov-list host-list" id="ov-hosts" hidden></ul>
+          <ul class="prov-list host-list" id="ov-accounts" hidden></ul>
           <div class="totals" id="totals"></div>
         </div>
         <div class="ov-right">
@@ -575,7 +607,7 @@ button.src:disabled { cursor: progress; opacity: .7; }
       </article>
     </div>
 
-    <p class="footnote muted">Read from Claude Code and Codex transcripts and the local OpenCode database on this machine, including Orca's account homes, and the folders and SSH hosts in Settings. Account histories are combined. No usage data is sent anywhere. Cost is an estimate at list API prices.</p>
+    <p class="footnote muted">Read from Claude Code and Codex transcripts, the local OpenCode database, and omp sessions and stats on this machine, including Orca's account homes, and the folders and SSH hosts in Settings. omp usage is split by account; other account histories are combined. No usage data is sent anywhere. Cost is an estimate at list API prices; omp usage uses the cost omp recorded.</p>
   </section>
   <section id="bd" aria-label="Breakdown" hidden>
     <p id="bd-status" class="status" role="status" hidden></p>
@@ -686,8 +718,36 @@ function trim(x) {
 // scanner gets its name here.
 const PROVIDER_LABELS = Object.freeze({ claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode' })
 
+const OMP_PROVIDER_NAMES = Object.freeze({
+  anthropic: 'Anthropic',
+  'openai-codex': 'OpenAI Codex',
+  openai: 'OpenAI',
+  'ollama-cloud': 'Ollama Cloud',
+  openrouter: 'OpenRouter',
+  typesafe: 'TypeSafe',
+  'kimi-code': 'Kimi Code',
+  zai: 'Z.ai',
+  google: 'Google',
+  'google-gemini-cli': 'Gemini CLI',
+  'github-copilot': 'GitHub Copilot',
+})
+
+function ompProviderName(id) {
+  if (Object.hasOwn(OMP_PROVIDER_NAMES, id)) return OMP_PROVIDER_NAMES[id]
+  return String(id).split(/[-_]+/).filter(Boolean).map((part) => part[0].toUpperCase() + part.slice(1)).join(' ') || 'Unknown'
+}
+
 function providerLabel(provider, fallback = provider) {
-  return Object.hasOwn(PROVIDER_LABELS, provider) ? PROVIDER_LABELS[provider] : fallback
+  if (Object.hasOwn(PROVIDER_LABELS, provider)) return PROVIDER_LABELS[provider]
+  if (typeof provider === 'string' && provider.startsWith('omp:')) return `OMP · ${ompProviderName(provider.slice(4))}`
+  return fallback
+}
+
+function accountLabel(raw, labels) {
+  const known = labels?.get?.(raw)
+  if (known) return known
+  const match = /^(.*)\/(.*)#(\d+)$/.exec(String(raw))
+  return match ? `${ompProviderName(match[2])} · ${match[1]} #${match[3]}` : String(raw)
 }
 
 // src/panel/charts.mjs
@@ -922,8 +982,8 @@ function sparkline(values, { width = 96, height = 26 } = {}) {
   return svg(width, height, `<polyline points="${d}" fill="none" class="spark" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${lx}" cy="${ly}" r="2.5" class="spark-dot"/>`, 'Trend')
 }
 
-const PROVIDER_COLORS = { claude: 'var(--s2)', codex: 'var(--s1)', opencode: 'var(--s3)' }
-const providerColor = (p, i = 0) => PROVIDER_COLORS[p] ?? ['var(--s3)', 'var(--s4)', 'var(--s5)'][i % 3]
+const PROVIDER_COLORS = { claude: 'var(--s2)', codex: 'var(--s1)', opencode: 'var(--s3)', 'omp:anthropic': 'var(--s6)', 'omp:openai-codex': 'var(--s5)', 'omp:ollama-cloud': 'var(--s4)' }
+const providerColor = (p) => PROVIDER_COLORS[p] ?? 'var(--s7)'
 
 // Monotone cubic (Fritsch–Carlson) path through points, so smoothing never overshoots below 0.
 function smoothPath(pts) {
@@ -1002,7 +1062,7 @@ function areaTrend(series, { metric = 'total', width = 420, height = 200, fmt = 
   // Hover columns: one per day, crosshair + every provider's value.
   const col = days.length > 1 ? plotW / (days.length - 1) : plotW
   days.forEach((day, j) => {
-    const rows = live.map((s) => [PROVIDER_LABELS[s.provider] ?? s.provider, fmt(Number(s.daily[j]?.[metric]) || 0)])
+    const rows = live.map((s) => [providerLabel(s.provider), fmt(Number(s.daily[j]?.[metric]) || 0)])
     const tip = esc(JSON.stringify({ title: shortDay(day), rows }))
     const cx = x(j)
     body += `<g class="mark xhair" data-tip="${tip}"><rect x="${Math.max(left, cx - col / 2)}" y="${top}" width="${col}" height="${plotH}" class="hit"/><line x1="${cx}" x2="${cx}" y1="${top}" y2="${top + plotH}" class="xline"/>`
@@ -1217,6 +1277,7 @@ const BUCKET_INFO = {
 const REASON_INFO = {
   ssh: { label: 'On SSH hosts', next: 'Breakdown reads transcripts on this machine only. SSH usage still counts in the total.' },
   opencode: { label: 'OpenCode sessions', next: 'Breakdown reads Claude Code and Codex transcripts. OpenCode usage still counts in the total.' },
+  omp: { label: 'omp sessions', next: 'Breakdown reads Claude Code and Codex transcripts. omp usage still counts in the total.' },
   zstd: { label: 'Compressed Codex files', next: "This Orca's Node.js can't read .zst files. Updating Orca fixes it." },
   'too-large': { label: 'Files too large', next: 'Compressed transcripts over 64 MB are skipped.' },
   parse: { label: "Files that couldn't be read", next: 'See the This machine status above for which files failed.' },
@@ -1354,7 +1415,7 @@ function findings(view) {
       const where = f.kind === 'cache-expired' ? lastSegment(f.where.project) : `${f.where.label} · ${lastSegment(f.where.project)}`
       const spark = (f.daily || []).length > 1 ? `<span class="spark-wrap" aria-hidden="true">${sparkline(f.daily.map((d) => d[1]), { width: 80, height: 22 })}</span>` : ''
       const facts = [`${f.facts?.sessions ?? 0} session${f.facts?.sessions === 1 ? '' : 's'}`, f.lastSeen ? `last seen ${f.lastSeen}` : ''].filter(Boolean).join(' · ')
-      return `<article class="finding"><header><span class="tag">${esc(PROVIDER_LABELS[f.harness] ?? f.harness ?? 'Unknown')}</span><h3>${esc(info.title)}</h3></header>
+      return `<article class="finding"><header><span class="tag">${esc(providerLabel(f.harness, f.harness ?? 'Unknown'))}</span><h3>${esc(info.title)}</h3></header>
 <p class="where" title="${esc(f.where.key)}">${esc(where)}</p>
 <div class="fig"><div><span class="label">Cost of this pattern</span><strong>${esc(usd(f.usd, { est: f.est }))}</strong></div>${spark}</div>
 <p class="muted">${esc(info.what)} ${esc(facts)}.</p>
@@ -1451,7 +1512,7 @@ function syncBody(result) {
 
 const $ = (id) => document.getElementById(id)
 const host = globalThis.orca
-const state = { view: 'usage', range: '7d', defaultRange: '7d', rangePicked: false, startDate: '', endDate: '', models: null, modelSearch: '', provider: 'all', host: 'all', scope: 'all', cache: true, metric: 'tokens', breakdown: 'model', sort: 'default', report: null, busy: false, bd: null, bdPath: [], prices: null, sync: null }
+const state = { view: 'usage', range: '7d', defaultRange: '7d', rangePicked: false, startDate: '', endDate: '', models: null, modelSearch: '', provider: 'all', host: 'all', account: 'all', scope: 'all', cache: true, metric: 'tokens', breakdown: 'model', sort: 'default', report: null, busy: false, bd: null, bdPath: [], prices: null, sync: null }
 const NOTE_KEY = 'usage-insights.prices-note.1.2.0'
 
 function money(n) {
@@ -1485,6 +1546,7 @@ function filterInput({ usage = false } = {}) {
     : { range: state.range, ...dates }
   if (state.provider !== 'all') input.providers = [state.provider]
   if (state.host !== 'all') input.hosts = [state.host]
+  if (state.account !== 'all' && usage) input.accounts = [state.account]
   if (state.scope !== 'all') input.scope = state.scope
   return input
 }
@@ -1568,8 +1630,9 @@ function cacheTile(t) {
 function activeFilters() {
   const out = []
   if (state.scope !== 'all') out.push({ key: 'scope', label: 'Worktrees only' })
-  if (state.provider !== 'all') out.push({ key: 'provider', label: PROVIDER_LABELS[state.provider] || state.provider })
+  if (state.provider !== 'all') out.push({ key: 'provider', label: providerLabel(state.provider) })
   if (state.host !== 'all') out.push({ key: 'host', label: hostLabel(state.host) })
+  if (state.account !== 'all' && state.view !== 'breakdown') out.push({ key: 'account', label: state.account })
   if (state.range === 'custom') out.push({ key: 'range', label: state.startDate === state.endDate ? state.startDate : `${state.startDate} – ${state.endDate}` })
   // Breakdown splits cost by what it went on, so the model and cache-token options don't apply there.
   if (state.view !== 'breakdown') {
@@ -1593,6 +1656,7 @@ function clearFilter(key) {
   if (key === 'scope' || key === 'all') state.scope = 'all'
   if (key === 'provider' || key === 'all') state.provider = 'all'
   if (key === 'host' || key === 'all') state.host = 'all'
+  if (key === 'account' || key === 'all') state.account = 'all'
   if (key === 'cache' || key === 'all') state.cache = true
   if (key === 'models' || key === 'all') {
     state.models = null
@@ -1662,7 +1726,11 @@ const STATE_WORDS = { empty: 'No transcripts', off: 'Turned off', ok: 'Up to dat
 // Labels name the transcript root; they never claim which subscription or account a history belongs to.
 function sourceLabel(source) {
   if (source.kind !== 'folder') return source.label
-  const provider = source.provider === 'claude' ? 'Claude' : PROVIDER_LABELS[source.provider] || source.provider || 'Transcripts'
+  if (source.provider === 'omp') {
+    const segments = String(source.path || '').split(/[\\/]+/).filter(Boolean)
+    return `omp · Profile · ${segments.at(-3) === 'profiles' ? segments.at(-2) : 'default'}`
+  }
+  const provider = source.provider === 'claude' ? 'Claude' : providerLabel(source.provider, source.provider || 'Transcripts')
   const parts = String(source.path || source.label || '').split(/[\\/]+/).filter(Boolean)
   const name = parts.at(-1) || 'root'
   const type = { orca: 'Orca root', default: 'Default', environment: 'Env root', extra: 'Folder' }[source.source] || 'Folder'
@@ -1685,7 +1753,7 @@ function renderSources(r) {
   if (!list.length) return
   const pill = (s) => {
     const state = STATE_WORDS[s.state] ? s.state : 'ok'
-    const empty = s.provider === 'opencode' ? 'no database' : 'no transcripts'
+    const empty = s.provider === 'opencode' ? 'no database' : s.provider === 'omp' ? 'no sessions' : 'no transcripts'
     const meta = state === 'off' ? 'turned off' : state === 'empty' ? empty : state === 'loading' ? 'connecting…' : state === 'error' ? 'failed' : state === 'warning' ? (s.message || 'check settings').toLowerCase().replace(/\.$/, '') : `${compact(s.records || 0)} turns · ${ago(s.lastScanAt)}`
     const detail = [s.path || '', s.source ? `Source: ${s.source}` : '', state === 'empty' ? empty.replace(/^no /, 'No ') : STATE_WORDS[state], s.message, s.files !== undefined ? `${s.files} files` : '', s.ms ? `scanned in ${s.ms} ms` : '', s.latestRecordAt ? `Latest recorded usage: ${new Date(s.latestRecordAt).toLocaleString()}` : ''].filter(Boolean).join(' · ')
     const icon = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SOURCE_ICONS[s.kind] || SOURCE_ICONS.local}</svg>`
@@ -1791,7 +1859,7 @@ function render() {
   $('hero-total').title = `${shownTotal.toLocaleString('en-US')} tokens`
   const zone = timeZoneName()
   const span = r.startDate && r.endDate ? (r.startDate === r.endDate ? r.startDate : `${r.startDate} – ${r.endDate}`) : 'All history'
-  $('selection-summary').textContent = `${span} · ${zone} · ${includeCache ? 'Includes cache tokens' : 'Excludes cache tokens'} · all accounts combined`
+  $('selection-summary').textContent = `${span} · ${zone} · ${includeCache ? 'Includes cache tokens' : 'Excludes cache tokens'} · ${state.account === 'all' ? 'all accounts' : state.account}`
   $('date-hint').textContent = `Inclusive local dates (${zone}). Use the same date for one day.`
   $('hero-sub').textContent = `tokens · ${money(t.costUsd)}${t.hasUnpriced ? '+' : ''} est.`
 
@@ -1810,7 +1878,11 @@ function render() {
   $('hosts').innerHTML = showHosts ? ['all', ...hosts].map((h) => opt('host', h, h === 'all' ? 'All machines' : hostLabel(h), h === state.host)).join('') : ''
   const showProviders = providers.length > 1 || state.provider !== 'all'
   $('sec-providers').hidden = !showProviders
-  $('providers').innerHTML = showProviders ? ['all', ...providers].map((p) => opt('provider', p, p === 'all' ? 'All providers' : PROVIDER_LABELS[p] || p, p === state.provider)).join('') : ''
+  $('providers').innerHTML = showProviders ? ['all', ...providers].map((p) => opt('provider', p, p === 'all' ? 'All providers' : providerLabel(p), p === state.provider)).join('') : ''
+  const accounts = r.accounts || []
+  const showAccounts = accounts.length > 0 || state.account !== 'all'
+  $('sec-accounts').hidden = !showAccounts
+  $('accounts').innerHTML = showAccounts ? ['all', ...accounts].map((a) => opt('account', a, a === 'all' ? 'All accounts' : a, a === state.account)).join('') : ''
   for (const b of $('scope').querySelectorAll('button')) b.setAttribute('aria-checked', String(b.dataset.scope === state.scope))
   $('cache').checked = state.cache
   renderModels(r)
@@ -1846,6 +1918,7 @@ function render() {
     $('daily-legend').innerHTML = keys.map((k) => legendItem(TOKEN_COLORS[k], TOKEN_LABELS[k], compact(t[k]))).join('')
   }
   renderOverview(r, keys, widthOf)
+  renderQuotas(r.quotas)
   renderBreakdown(r)
   renderSources(r)
   syncRadioTabs()
@@ -1869,17 +1942,24 @@ function renderOverview(r, keys, widthOf) {
   const fmt = isCost ? money : compact
   $('ov-total').textContent = isCost ? money(t.costUsd) + (t.hasUnpriced ? '+' : '') : compact(keys.reduce((a, k) => a + (t[k] || 0), 0))
   $('ov-sessions').textContent = `${t.sessions.toLocaleString()} sessions · ${t.turns.toLocaleString()} turns`
-  $('ov-providers').innerHTML = (r.byProvider || []).map((p, i) => {
+  $('ov-providers').innerHTML = (r.byProvider || []).map((p) => {
     const sessions = p.sessions !== undefined ? `<small>${p.sessions.toLocaleString()} sessions</small>` : ''
     const amount = isCost ? (p.costUsd == null ? 'unpriced' : money(p.costUsd)) : compact(p.total)
     const other = isCost ? `${compact(p.total)} tokens` : p.costUsd == null ? 'cost unpriced' : money(p.costUsd)
-    return `<li><span class="sw" style="background:${providerColor(p.provider, i)}"></span><span class="name">${esc(PROVIDER_LABELS[p.provider] || p.provider)}${sessions}</span><span class="amt">${esc(amount)}</span><span class="meta">${pct(p.share)} of tokens · ${esc(other)}</span></li>`
+    return `<li><span class="sw" style="background:${providerColor(p.provider)}"></span><span class="name">${esc(providerLabel(p.provider))}${sessions}</span><span class="amt">${esc(amount)}</span><span class="meta">${pct(p.share)} of tokens · ${esc(other)}</span></li>`
   }).join('')
   const byHost = r.byHost || []
   $('ov-hosts').hidden = byHost.length < 2
   $('ov-hosts').innerHTML = byHost.length < 2 ? '' : byHost.map((h) => {
     const amount = isCost ? (h.costUsd == null ? 'unpriced' : money(h.costUsd)) : compact(h.total)
     return `<li><span class="sw" style="background:var(--muted-fg)"></span><span class="name">${esc(hostLabel(h.host))}<small>${(h.sessions ?? 0).toLocaleString()} sessions</small></span><span class="amt">${esc(amount)}</span><span class="meta">${pct(h.share)} of tokens</span></li>`
+  }).join('')
+  const byAccount = r.byAccount || []
+  $('ov-accounts').hidden = !byAccount.length
+  $('ov-accounts').innerHTML = byAccount.map((a) => {
+    const amount = isCost ? (a.costUsd == null ? 'unpriced' : money(a.costUsd)) : compact(a.total)
+    const other = isCost ? `${compact(a.total)} tokens` : a.costUsd == null ? 'cost unpriced' : money(a.costUsd)
+    return `<li><span class="sw" style="background:${providerColor(a.provider)}"></span><span class="name">${esc(a.account)}<small>${(a.sessions ?? 0).toLocaleString()} sessions</small></span><span class="amt">${esc(amount)}</span><span class="meta">${pct(a.share)} of tokens · ${esc(other)}</span></li>`
   }).join('')
   $('trend-title').textContent = isCost ? 'Daily cost by provider' : 'Daily tokens by provider'
   const all = r.seriesByProvider || [{ provider: r.byProvider?.[0]?.provider || 'claude', daily: r.daily }]
@@ -1897,6 +1977,71 @@ function renderOverview(r, keys, widthOf) {
   const segs = keys.map((k) => ({ label: TOKEN_LABELS[k], value: t[k] || 0, color: TOKEN_COLORS[k] }))
   $('typebar').innerHTML = segmentBar(segs, { width: widthOf('typebar'), id: 'typebar' })
   $('type-legend').innerHTML = segs.map((s) => legendItem(s.color, s.label, compact(s.value))).join('')
+}
+
+function until(ms) {
+  const s = Math.round((ms - Date.now()) / 1000)
+  const d = Math.floor(s / 86400)
+  const h = Math.floor((s % 86400) / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  if (d) return `${d}d${h ? ` ${h}h` : ''}`
+  if (h) return `${h}h${m ? ` ${m}m` : ''}`
+  return `${m}m`
+}
+
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = sorted.length >> 1
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+}
+
+function providerLimits(accounts) {
+  const byLabel = new Map()
+  for (const account of accounts) {
+    for (const limit of account.limits) {
+      let row = byLabel.get(limit.label)
+      if (!row) byLabel.set(limit.label, (row = { label: limit.label, used: [], resetsAt: null, accounts: 0 }))
+      row.accounts++
+      if (limit.usedFraction != null) row.used.push(limit.usedFraction)
+      if (limit.resetsAt && (row.resetsAt === null || limit.resetsAt < row.resetsAt)) row.resetsAt = limit.resetsAt
+    }
+  }
+  return [...byLabel.values()].map((row) => ({ label: row.label, usedFraction: row.used.length ? median(row.used) : null, resetsAt: row.resetsAt, accounts: row.accounts }))
+}
+
+function limitRow(limit) {
+  const used = limit.usedFraction
+  const width = used == null ? 0 : Math.round(used * 1000) / 10
+  const tone = (used ?? 0) >= 0.9 ? ' hot' : (used ?? 0) >= 0.7 ? ' warm' : ''
+  const sub = `${limit.accounts} account${limit.accounts === 1 ? '' : 's'}`
+  const left = used == null ? '—' : `${Math.round((1 - used) * 100)}% left`
+  const reset = !limit.resetsAt ? '' : limit.resetsAt - Date.now() < 60_000 ? 'resets soon' : `resets in ${until(limit.resetsAt)}`
+  return `<div class="q-row${tone}"><span class="q-label">${esc(limit.label)}<small>${esc(sub)}</small></span><span class="q-bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${width}" aria-label="${esc(`${limit.label}, median of ${sub}: ${left}`)}"><i style="width:${width}%"></i></span><span class="q-left">${esc(left)}</span><span class="q-reset">${esc(reset)}</span></div>`
+}
+
+function renderQuotas(q) {
+  const list = q?.accounts || []
+  const errors = q?.errors || []
+  $('quotas').hidden = !list.length && !errors.length
+  if ($('quotas').hidden) return
+  const groups = new Map()
+  for (const a of list) {
+    if (!groups.has(a.provider)) groups.set(a.provider, [])
+    groups.get(a.provider).push(a)
+  }
+  $('quotas-sub').textContent = `${groups.size} provider${groups.size === 1 ? '' : 's'} · ${list.length} account${list.length === 1 ? '' : 's'}${q?.generatedAt ? ` · ${ago(q.generatedAt)}` : ''}`
+  const groupHtml = [...groups.values()]
+    .map((accounts) => ({ accounts, limits: providerLimits(accounts) }))
+    .sort((a, b) => Math.max(0, ...b.limits.map((l) => l.usedFraction ?? 0)) - Math.max(0, ...a.limits.map((l) => l.usedFraction ?? 0)))
+    .map(({ accounts, limits }) => {
+      const banked = accounts.reduce((n, a) => n + (a.resetsBanked || 0), 0)
+      const note = accounts.find((a) => a.notes?.length)?.notes[0] || ''
+      const rows = limits.length ? limits.map(limitRow) : [`<p class="q-note"${note ? ` title="${esc(note)}"` : ''}>No quotas reported</p>`]
+      const meta = `${accounts.length} account${accounts.length === 1 ? '' : 's'}${banked ? ` · ${banked} reset${banked === 1 ? '' : 's'} banked` : ''}`
+      return `<section class="q-group"><header><span class="sw" style="background:${providerColor(`omp:${accounts[0].provider}`)}"></span><b>${esc(accounts[0].providerName)}</b><small>${esc(meta)}</small></header>${rows.join('')}</section>`
+    })
+  const errorHtml = errors.map((e) => `<p class="q-error">${esc(e.profile ? `Profile ${e.profile}: ` : '')}${esc(e.message)}</p>`)
+  $('quotas-body').innerHTML = [...groupHtml, ...errorHtml].join('')
 }
 
 // Ranked table by model or by day, or every date x model pair with exact counts. The thin line under each
@@ -1930,7 +2075,7 @@ function renderBreakdown(r) {
     const columns = ['Date', 'Provider', 'Model', 'Input', 'Output', 'Cache read', 'Cache write', 'Total', 'Cost']
     const head = `<thead><tr>${columns.map((label) => `<th scope="col">${label}</th>`).join('')}</tr></thead>`
     const body = rows.length
-      ? rows.map((row) => `<tr><td>${esc(row.day)}</td><td>${esc(PROVIDER_LABELS[row.provider] || row.provider)}</td><td>${esc(row.model)}</td>${['input', 'output', 'cacheRead', 'cacheWrite', 'total'].map((key) => `<td>${esc(exact(row[key]))}</td>`).join('')}<td${row.costUsd == null ? ' class="muted"' : ''}>${row.costUsd == null ? '—' : money(row.costUsd)}</td></tr>`).join('')
+      ? rows.map((row) => `<tr><td>${esc(row.day)}</td><td>${esc(providerLabel(row.provider))}</td><td>${esc(row.model)}</td>${['input', 'output', 'cacheRead', 'cacheWrite', 'total'].map((key) => `<td>${esc(exact(row[key]))}</td>`).join('')}<td${row.costUsd == null ? ' class="muted"' : ''}>${row.costUsd == null ? '—' : money(row.costUsd)}</td></tr>`).join('')
       : `<tr><td colspan="${columns.length}" class="muted">No recorded usage matches these dates and filters.</td></tr>`
     $('breakdown').innerHTML = head + `<tbody>${body}</tbody>`
     return
@@ -2263,7 +2408,7 @@ function bindRadioKeys(group) {
 
 // Only the selected option is in the tab order (roving tabindex).
 function syncRadioTabs() {
-  for (const id of ['view', 'ranges', 'metric', 'scope', 'providers', 'hosts', 'bd-mode']) {
+  for (const id of ['view', 'ranges', 'metric', 'scope', 'providers', 'accounts', 'hosts', 'bd-mode']) {
     const items = [...$(id).querySelectorAll('button[role="radio"]')]
     const checked = items.find((b) => b.getAttribute('aria-checked') === 'true') || items[0]
     for (const b of items) b.tabIndex = b === checked ? 0 : -1
@@ -2271,7 +2416,7 @@ function syncRadioTabs() {
 }
 
 function bindControls() {
-  for (const id of ['view', 'ranges', 'metric', 'scope', 'providers', 'hosts', 'bd-mode']) bindRadioKeys($(id))
+  for (const id of ['view', 'ranges', 'metric', 'scope', 'providers', 'accounts', 'hosts', 'bd-mode']) bindRadioKeys($(id))
   $('scope').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-scope]')
     if (!b || b.dataset.scope === state.scope) return
@@ -2282,6 +2427,12 @@ function bindControls() {
     const b = e.target.closest('button[data-host]')
     if (!b || b.dataset.host === state.host) return
     state.host = b.dataset.host
+    load()
+  })
+  $('accounts').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-account]')
+    if (!b || b.dataset.account === state.account) return
+    state.account = b.dataset.account
     load()
   })
   $('ranges').addEventListener('click', (e) => {

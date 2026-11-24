@@ -61,6 +61,19 @@ export async function rootSpecs({
       if (entry.isDirectory() || entry.isSymbolicLink()) specs.push({ path: p.join(dir, entry.name, 'home'), kind, source: 'orca' });
     }
   }
+  const omp = p.join(base, '.omp');
+  specs.push({ path: p.join(omp, 'agent'), kind: 'omp', source: 'omp', profile: 'default' });
+  let profiles = [];
+  try {
+    profiles = await readdir(p.join(omp, 'profiles'), { withFileTypes: true });
+  } catch (error) {
+    if (error?.code !== 'ENOENT' && error?.code !== 'ENOTDIR') {
+      specs.push({ path: p.join(omp, 'profiles'), kind: 'omp', source: 'omp', message: `Cannot list omp profiles (${error?.code ?? 'error'})` });
+    }
+  }
+  for (const entry of profiles.sort((a, b) => a.name.localeCompare(b.name))) {
+    if (entry.isDirectory() || entry.isSymbolicLink()) specs.push({ path: p.join(omp, 'profiles', entry.name, 'agent'), kind: 'omp', source: 'omp', profile: entry.name });
+  }
   const seen = new Set();
   return specs.filter((spec) => {
     const key = `${spec.kind}:${platform === 'win32' ? spec.path.toLowerCase() : spec.path}`;

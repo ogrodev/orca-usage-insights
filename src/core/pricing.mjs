@@ -17,13 +17,17 @@ const tableMemo = new WeakMap();
 export function tableCosts(table, catalog = DEFAULT_CATALOG) {
   const memo = table.frozen ? tableMemo.get(table) : undefined;
   if (memo?.catalog === catalog) return memo.priced;
-  const { names, length, model, input, output, cacheRead, cacheWrite, cacheWrite1h } = table;
+  const { names, length, model, input, output, cacheRead, cacheWrite, cacheWrite1h, cost } = table;
   const entries = new Array(names.length + 1);
   const costs = new Float64Array(length);
   for (let i = 0; i < length; i++) {
     const m = model[i] + 1;
     let entry = entries[m];
     if (entry === undefined) entry = entries[m] = resolveModel(m === 0 ? undefined : names[m - 1], catalog);
+    if (!Number.isNaN(cost[i])) {
+      costs[i] = cost[i];
+      continue;
+    }
     const usd = entry ? entryCost(entry, input[i], output[i], cacheRead[i], cacheWrite[i], cacheWrite1h[i]) : null;
     costs[i] = usd === null ? NaN : usd;
   }

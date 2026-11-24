@@ -200,6 +200,7 @@ export function createRecordStore({ names = new NameDict() } = {}) {
     out.length = total;
     out.ms = new Float64Array(total);
     for (const field of TOKEN_FIELDS) out[field] = wide.has(field) ? new Float64Array(total) : new Uint32Array(total);
+    out.cost = new Float64Array(total);
     for (const field of NAME_FIELDS) out[field] = new Int32Array(total);
     out.keys = new Array(total).fill(undefined);
     let at = 0;
@@ -241,6 +242,7 @@ export function createRecordStore({ names = new NameDict() } = {}) {
         for (const field of COLUMNS) copy(field);
       } else {
         copy('ms');
+        copy('cost');
         for (const field of TOKEN_FIELDS) copy(field);
         const map = remapFor(t.dict);
         for (const field of NAME_FIELDS) {
@@ -273,6 +275,7 @@ export function createRecordStore({ names = new NameDict() } = {}) {
     out.cacheRead[i] = t.cacheRead[r];
     out.cacheWrite[i] = t.cacheWrite[r];
     out.cacheWrite1h[i] = t.cacheWrite1h[r];
+    out.cost[i] = t.cost[r];
     const map = t.dict === names ? null : remapFor(t.dict);
     const id = (value) => (value < 0 ? -1 : map ? map[value] : value);
     out.provider[i] = id(t.provider[r]);
@@ -281,6 +284,7 @@ export function createRecordStore({ names = new NameDict() } = {}) {
     out.sessionId[i] = id(t.sessionId[r]);
     out.cwd[i] = id(t.cwd[r]);
     out.host[i] = id(t.host[r]);
+    out.account[i] = id(t.account[r]);
   }
 
   function remapFor(dict) {

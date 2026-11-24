@@ -146,8 +146,13 @@ test('Orca account roots follow each OS convention and an explicit user-data ove
       return [{ name: 'account-a', isDirectory: () => true, isSymbolicLink: () => false }];
     } });
     const p = platform === 'win32' ? path.win32 : path.posix;
-    assert.deepEqual(seen, [p.join(expected, 'claude-profiles'), p.join(expected, 'codex-accounts')]);
-    assert.deepEqual(specs.filter((s) => s.source === 'orca').map((s) => s.path), seen.map((dir) => p.join(dir, 'account-a', 'home')));
+    const orcaDirs = [p.join(expected, 'claude-profiles'), p.join(expected, 'codex-accounts')];
+    assert.deepEqual(seen, [...orcaDirs, p.join('/fixture', '.omp', 'profiles')]);
+    assert.deepEqual(specs.filter((s) => s.source === 'orca').map((s) => s.path), orcaDirs.map((dir) => p.join(dir, 'account-a', 'home')));
+    assert.deepEqual(
+      specs.filter((s) => s.kind === 'omp').map((s) => [s.path, s.profile]),
+      [[p.join('/fixture', '.omp', 'agent'), 'default'], [p.join('/fixture', '.omp', 'profiles', 'account-a', 'agent'), 'account-a']],
+    );
   }
 });
 

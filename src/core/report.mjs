@@ -12,10 +12,10 @@ const TOP_PROJECTS = 8;
 
 // The query is { range, startDate?, endDate?, models?, includeCache? } (query.mjs). Without cache tokens,
 // every total, share and chart counts input and output only; the cache fields still report what was used.
-export function buildReport(records, { now = new Date(), providers, hosts, scope, catalog = DEFAULT_CATALOG, ...query } = {}) {
+export function buildReport(records, { now = new Date(), providers, hosts, accounts, accountLabels, scope, catalog = DEFAULT_CATALOG, ...query } = {}) {
   const { range, startDate, endDate, models: selectedModels, includeCache } = normalizeQuery(query, now);
-  const selected = selectRecords(records, { range, startDate, endDate, models: selectedModels, now, providers, hosts, scope });
-  const { table, rows, days, slots, count, hostNames, today, startDay, endDay, allProviders, allHosts, allModels, rowProviders } = selected;
+  const selected = selectRecords(records, { range, startDate, endDate, models: selectedModels, now, providers, hosts, accounts, accountLabels, scope });
+  const { table, rows, days, slots, count, hostNames, accountOf, today, startDay, endDay, allProviders, allHosts, allAccounts, allModels, rowProviders } = selected;
   const add = (b, input, output, cacheRead, cacheWrite, cost) => addTokens(b, input, output, cacheRead, cacheWrite, cost, includeCache);
   const { costs, entries } = tableCosts(table, catalog);
   const { names } = table;
@@ -28,16 +28,19 @@ export function buildReport(records, { now = new Date(), providers, hosts, scope
   const sessionsByProvider = new Map();
   const sessionsByModel = new Map();
   const sessionsByHost = new Map();
+  const sessionsByAccount = new Map();
+  const tokensByAccount = new Map();
   const tokensByModel = new Map();
   const punchCard = new Array(168).fill(0);
   const models = new Map();
   const projects = new Map();
   const providerBuckets = new Map();
   const hostBuckets = new Map();
+  const accountBuckets = new Map();
   const unpricedByModel = new Map(); // model id -> { model, turns, tokens }, in-range records only
   const dayModels = new Map(); // day -> model id * (names + 1) + provider id + 1 -> bucket with its sessions
   const sessionStride = names.length + 1;
-  const { provider: providerCol, model: modelCol, project: projectCol, sessionId: sessionCol, host: hostCol } = table;
+  const { provider: providerCol, model: modelCol, project: projectCol, sessionId: sessionCol, host: hostCol, account: accountCol } = table;
   const { input: inputCol, output: outputCol, cacheRead: readCol, cacheWrite: writeCol } = table;
   for (let k = 0; k < count; k++) {
     const i = rows[k];
@@ -76,6 +79,13 @@ export function buildReport(records, { now = new Date(), providers, hosts, scope
     add(bucket(projects, projectCol[i]), input, output, cacheRead, cacheWrite, cost);
     add(bucket(providerBuckets, provider), input, output, cacheRead, cacheWrite, cost);
     add(bucket(hostBuckets, host), input, output, cacheRead, cacheWrite, cost);
+    const account = accountOf(accountCol[i] + 1);
+    if (account !== undefined) {
+      add(bucket(accountBuckets, account), input, output, cacheRead, cacheWrite, cost);
+      getOrSet(getOrSet(sessionsByAccount, account, newMap), provider, newSet).add(sessionId);
+      const byProvider = getOrSet(tokensByAccount, account, newMap);
+      byProvider.set(providerName, (byProvider.get(providerName) ?? 0) + tokens);
+    }
     add(bucket(getOrSet(perProviderDay, provider, newMap), day), input, output, cacheRead, cacheWrite, cost);
     const detail = getOrSet(getOrSet(dayModels, day, newMap), model * sessionStride + provider + 1, () => ({ ...blank(), day, model, provider, sessions: new Set() }));
     add(detail, input, output, cacheRead, cacheWrite, cost);
@@ -146,6 +156,7 @@ export function buildReport(records, { now = new Date(), providers, hosts, scope
     models: [...allModels].sort(),
     providers: [...allProviders].sort(),
     hosts: sortHosts(allHosts),
+    accounts: [...allAccounts].sort(),
     scoped: Boolean(scope),
     prices: { version: catalog.version, asOf: newestAsOf(catalog) },
     totals: {
@@ -218,6 +229,17 @@ export function buildReport(records, { now = new Date(), providers, hosts, scope
         turns: b.pricedTurns + b.unpricedTurns,
       }))
       .sort(byTotal),
+    byAccount: [...accountBuckets]
+      .map(([account, b]) => ({
+        account,
+        provider: topProvider(tokensByAccount.get(account)),
+        ...tokenFields(b),
+        costUsd: costOf(b),
+        share: share(b.total),
+        sessions: countSessions(sessionsByAccount.get(account)),
+        turns: b.pricedTurns + b.unpricedTurns,
+      }))
+      .sort((a, b) => (b.costUsd ?? 0) - (a.costUsd ?? 0) || b.total - a.total),
     streak: { current, longest },
     peakDay,
   };

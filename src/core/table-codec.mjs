@@ -7,6 +7,8 @@ import { fromBase64, toBase64 } from './base64.mjs';
 import { COLUMNS, NAME_FIELDS, NameDict, RecordTable } from './table.mjs';
 
 const FORMAT = 1;
+const ADDED_COLUMNS = { cost: (n) => new Float64Array(n).fill(NaN), account: (n) => new Int32Array(n).fill(-1) };
+const FLOAT_COLUMNS = new Set(['ms', 'cost']);
 
 export function encodeTable(table, { binary = false } = {}) {
   const n = table.length;
@@ -51,7 +53,7 @@ export function decodeTable(encoded, dict = new NameDict()) {
   const table = new RecordTable(0, dict);
   table.keys = encoded.keys.map((k) => (typeof k === 'string' ? k : undefined));
   for (const field of COLUMNS) {
-    const column = decodeColumn(encoded[field], field);
+    const column = encoded[field] === undefined && ADDED_COLUMNS[field] ? ADDED_COLUMNS[field](n) : decodeColumn(encoded[field], field);
     if (column.length !== n) throw new Error(`bad record table column ${field}`);
     table[field] = column;
   }
@@ -88,7 +90,7 @@ const COLUMN_TYPES = { f64: Float64Array, u32: Uint32Array, i32: Int32Array, u8:
 function decodeColumn(value, field) {
   const isName = NAME_FIELDS.includes(field);
   if (ArrayBuffer.isView(value)) {
-    const ok = field === 'ms' ? value instanceof Float64Array : isName ? value instanceof Int32Array : value instanceof Float64Array || value instanceof Uint32Array;
+    const ok = FLOAT_COLUMNS.has(field) ? value instanceof Float64Array : isName ? value instanceof Int32Array : value instanceof Float64Array || value instanceof Uint32Array;
     if (!ok) throw new Error(`bad record table column ${field}`);
     return value;
   }
@@ -96,7 +98,7 @@ function decodeColumn(value, field) {
   const colon = value.indexOf(':');
   const tag = value.slice(0, colon);
   const Type = COLUMN_TYPES[tag];
-  const allowed = field === 'ms' ? tag === 'f64' : isName ? ['i32', 'n8', 'n16'].includes(tag) : ['f64', 'u32', 'u16', 'u8'].includes(tag);
+  const allowed = FLOAT_COLUMNS.has(field) ? tag === 'f64' : isName ? ['i32', 'n8', 'n16'].includes(tag) : ['f64', 'u32', 'u16', 'u8'].includes(tag);
   if (!Type || !allowed) throw new Error(`bad record table column ${field}`);
   const raw = fromBase64(value.slice(colon + 1), Type);
   if (tag === 'n8' || tag === 'n16') {

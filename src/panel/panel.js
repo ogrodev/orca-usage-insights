@@ -1,12 +1,12 @@
 // Panel controller: asks the worker for a Report and renders it. Knows nothing about transcripts.
-import { stackedBars, calendarHeatmap, punchCard, donut, hBars, sparkline, areaTrend, segmentBar, providerColor, compact, esc, TOKEN_KEYS, TOKEN_LABELS, TOKEN_COLORS, PROVIDER_LABELS } from './charts.mjs'
+import { stackedBars, calendarHeatmap, punchCard, donut, hBars, sparkline, areaTrend, segmentBar, providerColor, compact, esc, TOKEN_KEYS, TOKEN_LABELS, TOKEN_COLORS, providerLabel } from './charts.mjs'
 import { pixelBanner } from './art.mjs'
 import { headline, tree, findings, notAnalysed, legend, priceLine, syncBody, changedSyncRows } from './breakdown.js'
 import { normalizeQuery, localDay, dayKey, MIN_USAGE_DATE, RANGE_DAYS } from '../core/query.mjs'
 
 const $ = (id) => document.getElementById(id)
 const host = globalThis.orca
-const state = { view: 'usage', range: '7d', defaultRange: '7d', rangePicked: false, startDate: '', endDate: '', models: null, modelSearch: '', provider: 'all', host: 'all', scope: 'all', cache: true, metric: 'tokens', breakdown: 'model', sort: 'default', report: null, busy: false, bd: null, bdPath: [], prices: null, sync: null }
+const state = { view: 'usage', range: '7d', defaultRange: '7d', rangePicked: false, startDate: '', endDate: '', models: null, modelSearch: '', provider: 'all', host: 'all', account: 'all', scope: 'all', cache: true, metric: 'tokens', breakdown: 'model', sort: 'default', report: null, busy: false, bd: null, bdPath: [], prices: null, sync: null }
 const NOTE_KEY = 'usage-insights.prices-note.1.2.0'
 
 function money(n) {
@@ -40,6 +40,7 @@ function filterInput({ usage = false } = {}) {
     : { range: state.range, ...dates }
   if (state.provider !== 'all') input.providers = [state.provider]
   if (state.host !== 'all') input.hosts = [state.host]
+  if (state.account !== 'all' && usage) input.accounts = [state.account]
   if (state.scope !== 'all') input.scope = state.scope
   return input
 }
@@ -123,8 +124,9 @@ function cacheTile(t) {
 function activeFilters() {
   const out = []
   if (state.scope !== 'all') out.push({ key: 'scope', label: 'Worktrees only' })
-  if (state.provider !== 'all') out.push({ key: 'provider', label: PROVIDER_LABELS[state.provider] || state.provider })
+  if (state.provider !== 'all') out.push({ key: 'provider', label: providerLabel(state.provider) })
   if (state.host !== 'all') out.push({ key: 'host', label: hostLabel(state.host) })
+  if (state.account !== 'all' && state.view !== 'breakdown') out.push({ key: 'account', label: state.account })
   if (state.range === 'custom') out.push({ key: 'range', label: state.startDate === state.endDate ? state.startDate : `${state.startDate} – ${state.endDate}` })
   // Breakdown splits cost by what it went on, so the model and cache-token options don't apply there.
   if (state.view !== 'breakdown') {
@@ -148,6 +150,7 @@ function clearFilter(key) {
   if (key === 'scope' || key === 'all') state.scope = 'all'
   if (key === 'provider' || key === 'all') state.provider = 'all'
   if (key === 'host' || key === 'all') state.host = 'all'
+  if (key === 'account' || key === 'all') state.account = 'all'
   if (key === 'cache' || key === 'all') state.cache = true
   if (key === 'models' || key === 'all') {
     state.models = null
@@ -217,7 +220,11 @@ const STATE_WORDS = { empty: 'No transcripts', off: 'Turned off', ok: 'Up to dat
 // Labels name the transcript root; they never claim which subscription or account a history belongs to.
 function sourceLabel(source) {
   if (source.kind !== 'folder') return source.label
-  const provider = source.provider === 'claude' ? 'Claude' : PROVIDER_LABELS[source.provider] || source.provider || 'Transcripts'
+  if (source.provider === 'omp') {
+    const segments = String(source.path || '').split(/[\\/]+/).filter(Boolean)
+    return `omp · Profile · ${segments.at(-3) === 'profiles' ? segments.at(-2) : 'default'}`
+  }
+  const provider = source.provider === 'claude' ? 'Claude' : providerLabel(source.provider, source.provider || 'Transcripts')
   const parts = String(source.path || source.label || '').split(/[\\/]+/).filter(Boolean)
   const name = parts.at(-1) || 'root'
   const type = { orca: 'Orca root', default: 'Default', environment: 'Env root', extra: 'Folder' }[source.source] || 'Folder'
@@ -240,7 +247,7 @@ function renderSources(r) {
   if (!list.length) return
   const pill = (s) => {
     const state = STATE_WORDS[s.state] ? s.state : 'ok'
-    const empty = s.provider === 'opencode' ? 'no database' : 'no transcripts'
+    const empty = s.provider === 'opencode' ? 'no database' : s.provider === 'omp' ? 'no sessions' : 'no transcripts'
     const meta = state === 'off' ? 'turned off' : state === 'empty' ? empty : state === 'loading' ? 'connecting…' : state === 'error' ? 'failed' : state === 'warning' ? (s.message || 'check settings').toLowerCase().replace(/\.$/, '') : `${compact(s.records || 0)} turns · ${ago(s.lastScanAt)}`
     const detail = [s.path || '', s.source ? `Source: ${s.source}` : '', state === 'empty' ? empty.replace(/^no /, 'No ') : STATE_WORDS[state], s.message, s.files !== undefined ? `${s.files} files` : '', s.ms ? `scanned in ${s.ms} ms` : '', s.latestRecordAt ? `Latest recorded usage: ${new Date(s.latestRecordAt).toLocaleString()}` : ''].filter(Boolean).join(' · ')
     const icon = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SOURCE_ICONS[s.kind] || SOURCE_ICONS.local}</svg>`
@@ -346,7 +353,7 @@ export function render() {
   $('hero-total').title = `${shownTotal.toLocaleString('en-US')} tokens`
   const zone = timeZoneName()
   const span = r.startDate && r.endDate ? (r.startDate === r.endDate ? r.startDate : `${r.startDate} – ${r.endDate}`) : 'All history'
-  $('selection-summary').textContent = `${span} · ${zone} · ${includeCache ? 'Includes cache tokens' : 'Excludes cache tokens'} · all accounts combined`
+  $('selection-summary').textContent = `${span} · ${zone} · ${includeCache ? 'Includes cache tokens' : 'Excludes cache tokens'} · ${state.account === 'all' ? 'all accounts' : state.account}`
   $('date-hint').textContent = `Inclusive local dates (${zone}). Use the same date for one day.`
   $('hero-sub').textContent = `tokens · ${money(t.costUsd)}${t.hasUnpriced ? '+' : ''} est.`
 
@@ -365,7 +372,11 @@ export function render() {
   $('hosts').innerHTML = showHosts ? ['all', ...hosts].map((h) => opt('host', h, h === 'all' ? 'All machines' : hostLabel(h), h === state.host)).join('') : ''
   const showProviders = providers.length > 1 || state.provider !== 'all'
   $('sec-providers').hidden = !showProviders
-  $('providers').innerHTML = showProviders ? ['all', ...providers].map((p) => opt('provider', p, p === 'all' ? 'All providers' : PROVIDER_LABELS[p] || p, p === state.provider)).join('') : ''
+  $('providers').innerHTML = showProviders ? ['all', ...providers].map((p) => opt('provider', p, p === 'all' ? 'All providers' : providerLabel(p), p === state.provider)).join('') : ''
+  const accounts = r.accounts || []
+  const showAccounts = accounts.length > 0 || state.account !== 'all'
+  $('sec-accounts').hidden = !showAccounts
+  $('accounts').innerHTML = showAccounts ? ['all', ...accounts].map((a) => opt('account', a, a === 'all' ? 'All accounts' : a, a === state.account)).join('') : ''
   for (const b of $('scope').querySelectorAll('button')) b.setAttribute('aria-checked', String(b.dataset.scope === state.scope))
   $('cache').checked = state.cache
   renderModels(r)
@@ -401,6 +412,7 @@ export function render() {
     $('daily-legend').innerHTML = keys.map((k) => legendItem(TOKEN_COLORS[k], TOKEN_LABELS[k], compact(t[k]))).join('')
   }
   renderOverview(r, keys, widthOf)
+  renderQuotas(r.quotas)
   renderBreakdown(r)
   renderSources(r)
   syncRadioTabs()
@@ -424,17 +436,24 @@ function renderOverview(r, keys, widthOf) {
   const fmt = isCost ? money : compact
   $('ov-total').textContent = isCost ? money(t.costUsd) + (t.hasUnpriced ? '+' : '') : compact(keys.reduce((a, k) => a + (t[k] || 0), 0))
   $('ov-sessions').textContent = `${t.sessions.toLocaleString()} sessions · ${t.turns.toLocaleString()} turns`
-  $('ov-providers').innerHTML = (r.byProvider || []).map((p, i) => {
+  $('ov-providers').innerHTML = (r.byProvider || []).map((p) => {
     const sessions = p.sessions !== undefined ? `<small>${p.sessions.toLocaleString()} sessions</small>` : ''
     const amount = isCost ? (p.costUsd == null ? 'unpriced' : money(p.costUsd)) : compact(p.total)
     const other = isCost ? `${compact(p.total)} tokens` : p.costUsd == null ? 'cost unpriced' : money(p.costUsd)
-    return `<li><span class="sw" style="background:${providerColor(p.provider, i)}"></span><span class="name">${esc(PROVIDER_LABELS[p.provider] || p.provider)}${sessions}</span><span class="amt">${esc(amount)}</span><span class="meta">${pct(p.share)} of tokens · ${esc(other)}</span></li>`
+    return `<li><span class="sw" style="background:${providerColor(p.provider)}"></span><span class="name">${esc(providerLabel(p.provider))}${sessions}</span><span class="amt">${esc(amount)}</span><span class="meta">${pct(p.share)} of tokens · ${esc(other)}</span></li>`
   }).join('')
   const byHost = r.byHost || []
   $('ov-hosts').hidden = byHost.length < 2
   $('ov-hosts').innerHTML = byHost.length < 2 ? '' : byHost.map((h) => {
     const amount = isCost ? (h.costUsd == null ? 'unpriced' : money(h.costUsd)) : compact(h.total)
     return `<li><span class="sw" style="background:var(--muted-fg)"></span><span class="name">${esc(hostLabel(h.host))}<small>${(h.sessions ?? 0).toLocaleString()} sessions</small></span><span class="amt">${esc(amount)}</span><span class="meta">${pct(h.share)} of tokens</span></li>`
+  }).join('')
+  const byAccount = r.byAccount || []
+  $('ov-accounts').hidden = !byAccount.length
+  $('ov-accounts').innerHTML = byAccount.map((a) => {
+    const amount = isCost ? (a.costUsd == null ? 'unpriced' : money(a.costUsd)) : compact(a.total)
+    const other = isCost ? `${compact(a.total)} tokens` : a.costUsd == null ? 'cost unpriced' : money(a.costUsd)
+    return `<li><span class="sw" style="background:${providerColor(a.provider)}"></span><span class="name">${esc(a.account)}<small>${(a.sessions ?? 0).toLocaleString()} sessions</small></span><span class="amt">${esc(amount)}</span><span class="meta">${pct(a.share)} of tokens · ${esc(other)}</span></li>`
   }).join('')
   $('trend-title').textContent = isCost ? 'Daily cost by provider' : 'Daily tokens by provider'
   const all = r.seriesByProvider || [{ provider: r.byProvider?.[0]?.provider || 'claude', daily: r.daily }]
@@ -452,6 +471,71 @@ function renderOverview(r, keys, widthOf) {
   const segs = keys.map((k) => ({ label: TOKEN_LABELS[k], value: t[k] || 0, color: TOKEN_COLORS[k] }))
   $('typebar').innerHTML = segmentBar(segs, { width: widthOf('typebar'), id: 'typebar' })
   $('type-legend').innerHTML = segs.map((s) => legendItem(s.color, s.label, compact(s.value))).join('')
+}
+
+function until(ms) {
+  const s = Math.round((ms - Date.now()) / 1000)
+  const d = Math.floor(s / 86400)
+  const h = Math.floor((s % 86400) / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  if (d) return `${d}d${h ? ` ${h}h` : ''}`
+  if (h) return `${h}h${m ? ` ${m}m` : ''}`
+  return `${m}m`
+}
+
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = sorted.length >> 1
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+}
+
+function providerLimits(accounts) {
+  const byLabel = new Map()
+  for (const account of accounts) {
+    for (const limit of account.limits) {
+      let row = byLabel.get(limit.label)
+      if (!row) byLabel.set(limit.label, (row = { label: limit.label, used: [], resetsAt: null, accounts: 0 }))
+      row.accounts++
+      if (limit.usedFraction != null) row.used.push(limit.usedFraction)
+      if (limit.resetsAt && (row.resetsAt === null || limit.resetsAt < row.resetsAt)) row.resetsAt = limit.resetsAt
+    }
+  }
+  return [...byLabel.values()].map((row) => ({ label: row.label, usedFraction: row.used.length ? median(row.used) : null, resetsAt: row.resetsAt, accounts: row.accounts }))
+}
+
+function limitRow(limit) {
+  const used = limit.usedFraction
+  const width = used == null ? 0 : Math.round(used * 1000) / 10
+  const tone = (used ?? 0) >= 0.9 ? ' hot' : (used ?? 0) >= 0.7 ? ' warm' : ''
+  const sub = `${limit.accounts} account${limit.accounts === 1 ? '' : 's'}`
+  const left = used == null ? '—' : `${Math.round((1 - used) * 100)}% left`
+  const reset = !limit.resetsAt ? '' : limit.resetsAt - Date.now() < 60_000 ? 'resets soon' : `resets in ${until(limit.resetsAt)}`
+  return `<div class="q-row${tone}"><span class="q-label">${esc(limit.label)}<small>${esc(sub)}</small></span><span class="q-bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${width}" aria-label="${esc(`${limit.label}, median of ${sub}: ${left}`)}"><i style="width:${width}%"></i></span><span class="q-left">${esc(left)}</span><span class="q-reset">${esc(reset)}</span></div>`
+}
+
+function renderQuotas(q) {
+  const list = q?.accounts || []
+  const errors = q?.errors || []
+  $('quotas').hidden = !list.length && !errors.length
+  if ($('quotas').hidden) return
+  const groups = new Map()
+  for (const a of list) {
+    if (!groups.has(a.provider)) groups.set(a.provider, [])
+    groups.get(a.provider).push(a)
+  }
+  $('quotas-sub').textContent = `${groups.size} provider${groups.size === 1 ? '' : 's'} · ${list.length} account${list.length === 1 ? '' : 's'}${q?.generatedAt ? ` · ${ago(q.generatedAt)}` : ''}`
+  const groupHtml = [...groups.values()]
+    .map((accounts) => ({ accounts, limits: providerLimits(accounts) }))
+    .sort((a, b) => Math.max(0, ...b.limits.map((l) => l.usedFraction ?? 0)) - Math.max(0, ...a.limits.map((l) => l.usedFraction ?? 0)))
+    .map(({ accounts, limits }) => {
+      const banked = accounts.reduce((n, a) => n + (a.resetsBanked || 0), 0)
+      const note = accounts.find((a) => a.notes?.length)?.notes[0] || ''
+      const rows = limits.length ? limits.map(limitRow) : [`<p class="q-note"${note ? ` title="${esc(note)}"` : ''}>No quotas reported</p>`]
+      const meta = `${accounts.length} account${accounts.length === 1 ? '' : 's'}${banked ? ` · ${banked} reset${banked === 1 ? '' : 's'} banked` : ''}`
+      return `<section class="q-group"><header><span class="sw" style="background:${providerColor(`omp:${accounts[0].provider}`)}"></span><b>${esc(accounts[0].providerName)}</b><small>${esc(meta)}</small></header>${rows.join('')}</section>`
+    })
+  const errorHtml = errors.map((e) => `<p class="q-error">${esc(e.profile ? `Profile ${e.profile}: ` : '')}${esc(e.message)}</p>`)
+  $('quotas-body').innerHTML = [...groupHtml, ...errorHtml].join('')
 }
 
 // Ranked table by model or by day, or every date x model pair with exact counts. The thin line under each
@@ -485,7 +569,7 @@ function renderBreakdown(r) {
     const columns = ['Date', 'Provider', 'Model', 'Input', 'Output', 'Cache read', 'Cache write', 'Total', 'Cost']
     const head = `<thead><tr>${columns.map((label) => `<th scope="col">${label}</th>`).join('')}</tr></thead>`
     const body = rows.length
-      ? rows.map((row) => `<tr><td>${esc(row.day)}</td><td>${esc(PROVIDER_LABELS[row.provider] || row.provider)}</td><td>${esc(row.model)}</td>${['input', 'output', 'cacheRead', 'cacheWrite', 'total'].map((key) => `<td>${esc(exact(row[key]))}</td>`).join('')}<td${row.costUsd == null ? ' class="muted"' : ''}>${row.costUsd == null ? '—' : money(row.costUsd)}</td></tr>`).join('')
+      ? rows.map((row) => `<tr><td>${esc(row.day)}</td><td>${esc(providerLabel(row.provider))}</td><td>${esc(row.model)}</td>${['input', 'output', 'cacheRead', 'cacheWrite', 'total'].map((key) => `<td>${esc(exact(row[key]))}</td>`).join('')}<td${row.costUsd == null ? ' class="muted"' : ''}>${row.costUsd == null ? '—' : money(row.costUsd)}</td></tr>`).join('')
       : `<tr><td colspan="${columns.length}" class="muted">No recorded usage matches these dates and filters.</td></tr>`
     $('breakdown').innerHTML = head + `<tbody>${body}</tbody>`
     return
@@ -818,7 +902,7 @@ function bindRadioKeys(group) {
 
 // Only the selected option is in the tab order (roving tabindex).
 function syncRadioTabs() {
-  for (const id of ['view', 'ranges', 'metric', 'scope', 'providers', 'hosts', 'bd-mode']) {
+  for (const id of ['view', 'ranges', 'metric', 'scope', 'providers', 'accounts', 'hosts', 'bd-mode']) {
     const items = [...$(id).querySelectorAll('button[role="radio"]')]
     const checked = items.find((b) => b.getAttribute('aria-checked') === 'true') || items[0]
     for (const b of items) b.tabIndex = b === checked ? 0 : -1
@@ -826,7 +910,7 @@ function syncRadioTabs() {
 }
 
 function bindControls() {
-  for (const id of ['view', 'ranges', 'metric', 'scope', 'providers', 'hosts', 'bd-mode']) bindRadioKeys($(id))
+  for (const id of ['view', 'ranges', 'metric', 'scope', 'providers', 'accounts', 'hosts', 'bd-mode']) bindRadioKeys($(id))
   $('scope').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-scope]')
     if (!b || b.dataset.scope === state.scope) return
@@ -837,6 +921,12 @@ function bindControls() {
     const b = e.target.closest('button[data-host]')
     if (!b || b.dataset.host === state.host) return
     state.host = b.dataset.host
+    load()
+  })
+  $('accounts').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-account]')
+    if (!b || b.dataset.account === state.account) return
+    state.account = b.dataset.account
     load()
   })
   $('ranges').addEventListener('click', (e) => {

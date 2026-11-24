@@ -30,7 +30,7 @@ Needs Orca 1.4.248 or newer.
 
 ## What you get
 
-The panel reads your Claude Code and Codex transcripts, plus the local OpenCode database, and turns them into:
+The panel reads your Claude Code and Codex transcripts, the local OpenCode database, and your omp sessions and stats, and turns them into:
 
 * **Totals** for today, 7 days, 30 days, 90 days, everything or dates you pick: tokens, estimated cost, today, cache hit rate, sessions and your streak.
 * **Daily charts** of tokens or cost, per token type and per provider.
@@ -110,6 +110,21 @@ Prices are USD per million tokens:
 
 The first entry changes one price of a known model, the second adds a new model, and the alias prices a model name as another. A new model needs its `provider` unless its name starts with `claude-`: `anthropic` splits cache writes into `5m` and `1h`, and every other provider (including `openai`, the default) takes one `default` rate. Use an `opencode/` or `opencode-go/` name to set a channel price. Your file always wins over the bundled and synced prices, and Sync, Undo and Reset never change it. The panel picks up edits on the next refresh and lists any line it couldn't use.
 
+## omp
+
+The plugin reads every omp profile on this machine: `~/.omp/agent` (the default profile) and each `~/.omp/profiles/<name>/agent`. A new profile shows up on the next scan. Each profile is a folder in the source strip, named `omp · Profile · <name>`. Click it to leave that profile out, or list it in **Turned-off transcript folders**.
+
+For each profile it reads:
+
+* the session files under `sessions/` and `archive/sessions/`, subagents and advisors included, for every request and side call (titles, judges, compaction) with its provider, model, tokens, cost and account;
+* `stats.db`, read-only, for older requests whose session files omp has deleted.
+
+A request that is in both, or in a forked session, counts once. Cost is the cost omp recorded, not the price list.
+
+Each omp provider is its own provider in the panel (`OMP · Anthropic`, `OMP · OpenAI Codex`, …). The **Account** filter and the account list split omp usage by the account that served each request. `stats.db` does not record accounts, so requests known only from it count under their provider without an account.
+
+The **Quotas** card shows one list per provider. Each limit shows the median use across that provider's accounts, the number of accounts that have the limit, and the earliest reset among them. The provider line also counts its accounts and banked resets. It comes from `omp usage --json`, which the worker runs once a minute at most, per profile, and again when you click **Refresh**. omp calls its providers' usage endpoints with its own credentials; the plugin never reads them. The same call gives each account its name (its email). The names are kept in `omp-accounts-v1.json` in the cache folder, so an account you removed from omp keeps its name. If `omp` is not on the worker's `PATH` or in `~/.local/bin`, set **omp command** in Settings.
+
 ## More machines and folders
 
 By default the plugin reads this machine's `~/.claude`, `~/.config/claude` and `~/.codex`, plus `CLAUDE_CONFIG_DIR` and `CODEX_HOME` when they're set, and every Claude profile and Codex account home Orca manages. A new account shows up on the next scan.
@@ -155,9 +170,9 @@ The first open after updating from 1.1.0 reads everything once, like a first ins
 
 ## Privacy
 
-Your transcripts stay on your machines. The plugin makes no network requests of its own, with two exceptions you start yourself: the SSH connections you add, and **Sync prices**, which downloads the public price lists from `raw.githubusercontent.com` (LiteLLM) and `models.dev` when you click it. Nothing about your usage is sent with those requests.
+Your transcripts stay on your machines. The plugin makes no network requests of its own, with two exceptions you start yourself: the SSH connections you add, and **Sync prices**, which downloads the public price lists from `raw.githubusercontent.com` (LiteLLM) and `models.dev` when you click it. Nothing about your usage is sent with those requests. For the Quotas card it runs your `omp usage --json`, and omp asks your providers for your current limits.
 
-**What it reads:** your Claude Code and Codex transcripts, including Codex's compressed `.jsonl.zst` files, and your local OpenCode SQLite database. Breakdown does not read OpenCode yet, so its spend shows under **Not analysed**.
+**What it reads:** your Claude Code and Codex transcripts, including Codex's compressed `.jsonl.zst` files, your local OpenCode SQLite database, and your omp session files and `stats.db`. Breakdown does not read OpenCode or omp yet, so their spend shows under **Not analysed**.
 
 **What it keeps** in its cache folder, so later opens are fast:
 

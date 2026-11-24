@@ -3,12 +3,13 @@
 // added in one place. Providers that keep usage in a database instead (OpenCode) are not listed here:
 // they are a source of their own (src/node/opencode-source.mjs). Display names for every provider live
 // in provider-names.mjs. Imports only the core parsers and their markers. records.mjs never imports this file.
-import { CLAUDE_MARKERS, CODEX_MARKERS, createClaudeParser, createCodexParser } from './records.mjs';
+import { CLAUDE_MARKERS, CODEX_MARKERS, OMP_MARKERS, OMP_MARKER_HEAD, createClaudeParser, createCodexParser, createOmpParser } from './records.mjs';
 
 export const PROVIDERS = {
   claude: { markers: CLAUDE_MARKERS, subdirs: ['projects'], createParser: createClaudeParser },
   // Codex event types sit in a line's first ~100 bytes, so only the head is searched and tool output is skipped.
   codex: { markers: CODEX_MARKERS, markerHead: 256, subdirs: ['sessions', 'archived_sessions'], createParser: createCodexParser },
+  omp: { markers: OMP_MARKERS, markerHead: OMP_MARKER_HEAD, subdirs: ['sessions', 'archive/sessions'], createParser: createOmpParser },
 };
 
 // A line can only produce a record (or parser state) when it contains one of these. The scanner

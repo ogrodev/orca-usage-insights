@@ -7,6 +7,10 @@ import { createFold } from '../core/breakdown/fold.mjs';
 const LF = 0x0a;
 const ADAPTERS = { claude: createClaudeEvents, codex: createCodexEvents };
 
+export function digestible(kind) {
+  return Object.hasOwn(ADAPTERS, kind);
+}
+
 // `adopt`: state() returns live objects (see createFold), for a caller that drops the consumer after reading it.
 export function createDigestConsumer(file, state = null, { adopt = false } = {}) {
   const make = ADAPTERS[file.kind];

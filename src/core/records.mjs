@@ -10,6 +10,8 @@ import { timestampParser } from './time.mjs';
 const CLAUDE_MARKER = '"usage"';
 export const CLAUDE_MARKERS = [CLAUDE_MARKER];
 export const CODEX_MARKERS = ['token_count', 'turn_context', 'session_meta'];
+export const OMP_MARKERS = ['"type":"session"', '"role":"assistant"', '"type":"model_usage"'];
+export const OMP_MARKER_HEAD = 256;
 const TOTAL_KEYS = ['input_tokens', 'cached_input_tokens', 'output_tokens', 'reasoning_output_tokens', 'total_tokens'];
 const MIN_YEAR = 2020;
 
@@ -120,6 +122,83 @@ export function createCodexParser(ctx, state, { names } = {}) {
     records: () => table.toRecords(),
     state: ({ binary = false } = {}) => ({ model, project: currentProject, cwd: currentCwd, ...identity.state(), table: encodeTable(table, { binary }) }),
   };
+}
+
+export function ompKey(profile, entryId, ms) {
+  return `omp:${profile}:${entryId}:${ms}`;
+}
+
+export function ompAccount(profile, provider, credentialId) {
+  return `${profile}/${provider}#${credentialId}`;
+}
+
+export function createOmpParser(ctx, state, { names } = {}) {
+  const profile = ctx?.profile ?? 'default';
+  const host = ctx?.host ?? 'local';
+  let sessionId = state?.sessionId ?? ctx?.sessionId ?? '';
+  let project = state?.project ?? ctx?.project ?? '';
+  let cwd = state?.cwd ?? '';
+  const table = restoreTable(state, names);
+  const parse = timestampParser();
+  const inRange = yearCheck();
+  let rowOf = null;
+  const add = (obj) => {
+    if (obj.type === 'session') {
+      sessionId = nonEmptyString(obj.id) ?? sessionId;
+      if (nonEmptyString(obj.cwd)) {
+        cwd = obj.cwd;
+        project = lastSegment(obj.cwd) || project;
+      }
+      return;
+    }
+    const entry = obj.type === 'message' ? obj.message : obj.type === 'model_usage' ? obj : null;
+    if (!isObject(entry) || (obj.type === 'message' && entry.role !== 'assistant') || !isObject(entry.usage)) return;
+    const ms = typeof entry.timestamp === 'number' ? entry.timestamp : typeof obj.timestamp === 'string' ? parse(obj.timestamp) : NaN;
+    if (!inRange(ms)) return;
+    const id = nonEmptyString(obj.id);
+    const key = id ? ompKey(profile, id, ms) : undefined;
+    if (key !== undefined) {
+      rowOf ??= keyRows(table);
+      if (rowOf.has(key)) return;
+    }
+    const usage = entry.usage;
+    const provider = nonEmptyString(entry.provider) ?? 'unknown';
+    const account = Number.isSafeInteger(entry.credentialId) ? ompAccount(profile, provider, entry.credentialId) : undefined;
+    const total = usage.cost?.total;
+    const cost = typeof total === 'number' && Number.isFinite(total) ? total : NaN;
+    const cacheWrite = count(usage.cacheWrite);
+    const cacheWrite1h = Math.min(cacheWrite, count(usage.cttl?.ephemeral1h));
+    const model = nonEmptyString(entry.model) ?? 'unknown';
+    const row = table.push(key, ms, `omp:${provider}`, model, project, sessionId, cwd, host, count(usage.input), count(usage.output), count(usage.cacheRead), cacheWrite, cacheWrite1h, account, cost);
+    if (key !== undefined) rowOf.set(key, row);
+  };
+  return {
+    push(text) {
+      for (const line of completeLines(text)) {
+        const head = line.slice(0, OMP_MARKER_HEAD);
+        if (!OMP_MARKERS.some((marker) => head.includes(marker))) continue;
+        const obj = parseOmpLine(line);
+        if (obj) add(obj);
+      }
+    },
+    pushObject: add,
+    table: () => table,
+    records: () => table.toRecords(),
+    state: ({ binary = false } = {}) => ({ sessionId, project, cwd, table: encodeTable(table, { binary }) }),
+  };
+}
+
+function parseOmpLine(line) {
+  if (line.length >= SLIM_MIN) {
+    const content = line.indexOf('"content":[');
+    const usage = line.lastIndexOf('"usage":{');
+    const api = usage > 0 ? line.lastIndexOf(',"api":"', usage) : -1;
+    if (content > 0 && api > content) {
+      const slim = parseJson(`${line.slice(0, content)}"content":[]${line.slice(api)}`);
+      if (isObject(slim?.message?.usage)) return slim;
+    }
+  }
+  return parseJson(line);
 }
 
 // Which Codex token_count lines are usage, and their keys. The records parser and the Breakdown adapter

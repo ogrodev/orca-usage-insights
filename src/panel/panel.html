@@ -13,7 +13,7 @@
     <div id="banner" class="banner-wrap"></div>
     <div class="hero-text">
       <h1>Usage Insights</h1>
-      <p id="updated" class="muted">Reading your Claude Code, Codex and OpenCode usage…</p>
+      <p id="updated" class="muted">Reading your Claude Code, Codex, OpenCode and omp usage…</p>
     </div>
     <div class="hero-stat"><strong id="hero-total"></strong><span id="hero-sub" class="muted"></span></div>
   </section>
@@ -44,6 +44,10 @@
         <section class="pop-section" id="sec-providers" hidden>
           <h3 class="pop-title" id="providers-title">Provider</h3>
           <div class="opt-list" role="radiogroup" aria-labelledby="providers-title" id="providers"></div>
+        </section>
+        <section class="pop-section" id="sec-accounts" hidden>
+          <h3 class="pop-title" id="accounts-title">Account</h3>
+          <div class="opt-list" role="radiogroup" aria-labelledby="accounts-title" id="accounts"></div>
         </section>
         <section class="pop-section" id="sec-models">
           <h3 class="pop-title" id="models-title">Models</h3>
@@ -88,6 +92,11 @@
   <section id="content" hidden>
     <div class="tiles" id="tiles"></div>
 
+    <article class="card" id="quotas" hidden>
+      <header><h2>Quotas</h2><span class="muted small" id="quotas-sub"></span></header>
+      <div id="quotas-body"></div>
+    </article>
+
     <article class="card">
       <div class="overview">
         <div class="ov-left">
@@ -95,6 +104,7 @@
           <p class="muted" id="ov-sessions"></p>
           <ul class="prov-list" id="ov-providers"></ul>
           <ul class="prov-list host-list" id="ov-hosts" hidden></ul>
+          <ul class="prov-list host-list" id="ov-accounts" hidden></ul>
           <div class="totals" id="totals"></div>
         </div>
         <div class="ov-right">
@@ -149,7 +159,7 @@
       </article>
     </div>
 
-    <p class="footnote muted">Read from Claude Code and Codex transcripts and the local OpenCode database on this machine, including Orca's account homes, and the folders and SSH hosts in Settings. Account histories are combined. No usage data is sent anywhere. Cost is an estimate at list API prices.</p>
+    <p class="footnote muted">Read from Claude Code and Codex transcripts, the local OpenCode database, and omp sessions and stats on this machine, including Orca's account homes, and the folders and SSH hosts in Settings. omp usage is split by account; other account histories are combined. No usage data is sent anywhere. Cost is an estimate at list API prices; omp usage uses the cost omp recorded.</p>
   </section>
   <section id="bd" aria-label="Breakdown" hidden>
     <p id="bd-status" class="status" role="status" hidden></p>
